@@ -52,6 +52,8 @@ private:
 	size_t recordSize_, mapreduceMapMemory_, mapreduceReduceMemory_, amResourceMB_;
 	int mapCpuVcores_, reduceCpuVcores_;
 	double mapIntensity_, mapSortIntensity_, reduceIntensity_, reduceSortIntensity_, combinerIntensity_;
+	std::vector<size_t> queueIDs_;
+	std::vector<double> schQueues_;
 };
 
 #endif /* INIT_H_ */

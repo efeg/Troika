@@ -40,6 +40,7 @@ Entity::~Entity() {
 void Entity::setAttribute(int attribute) {
 	attribute_ = attribute;
 }
+
 int Entity::getAttribute() const {
 	return attribute_;
 }

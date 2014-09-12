@@ -47,37 +47,36 @@ void Switch::work (Event* ev){
 
 		if(masterLinkType_ == -1){	// AGGREGATION SWITCH
 
-			int nextSwitchExpEvent = nodeExpEventT_switchExpEventT[ev->getDestinationEventType()];
+			int nextSwitchExpEvent = nodeExpEventT_switchExpEventT[ev->getDestEventType()];
 			int nextEventType =  switchExpEventT_masterLinkExpEventT[nextSwitchExpEvent];
 
 			// generate POST-LINK EVENT, enqueue to eventsList
-			Event newEvent(ev->getApplicationId(), ev->getEventTime(), ev->getNeededResQuantity(), 0.0, nextEventType, ev->getDestinationEventType(),
+			Event newEvent(ev->getAppID(), ev->getEventTime(), ev->getNeededResQuantity(), 0.0, nextEventType, ev->getDestEventType(),
 					   ev->getEventBehavior(), ev->getEntityIns().getEntityType(), SEIZEFROMMASTER, ev->getEntityIns().getAttribute(), ev->getFsLoc(), ev->getFsId(), ev->getRedId());
 			eventsList.push(newEvent);
 		}
 		else{	// TOR SWITCH
 
-			if(nodeExpEventT_switchExpEventT[ev->getDestinationEventType()] == expectedEventType_){	// Destination Node is within the rack of this TOR SWITCH
-				int nextEventType = nodeExpEventT_linkExpEventT[ev->getDestinationEventType()];
+			if(nodeExpEventT_switchExpEventT[ev->getDestEventType()] == expectedEventType_){	// Destination Node is within the rack of this TOR SWITCH
+				int nextEventType = nodeExpEventT_linkExpEventT[ev->getDestEventType()];
 				// generate POST-LINK EVENT, enqueue to eventsList
-				Event newEvent(ev->getApplicationId(), ev->getEventTime(), ev->getNeededResQuantity(), 0.0, nextEventType, ev->getDestinationEventType(),
+				Event newEvent(ev->getAppID(), ev->getEventTime(), ev->getNeededResQuantity(), 0.0, nextEventType, ev->getDestEventType(),
 						   ev->getEventBehavior(), ev->getEntityIns().getEntityType(), SEIZEFROMMASTER, ev->getEntityIns().getAttribute(), ev->getFsLoc(), ev->getFsId(), ev->getRedId());
 				eventsList.push(newEvent);
 			}
 			else{
 
 				// generate POST-LINK EVENT, enqueue to eventsList
-				Event newEvent(ev->getApplicationId(), ev->getEventTime(), ev->getNeededResQuantity(), 0.0, masterLinkType_, ev->getDestinationEventType(),
+				Event newEvent(ev->getAppID(), ev->getEventTime(), ev->getNeededResQuantity(), 0.0, masterLinkType_, ev->getDestEventType(),
 						   ev->getEventBehavior(), ev->getEntityIns().getEntityType(), SEIZETOMASTER, ev->getEntityIns().getAttribute(), ev->getFsLoc(), ev->getFsId(), ev->getRedId());
 				eventsList.push(newEvent);
 			}
 		}
 	}
 	else{	// from master
-
-		int nextEventType = nodeExpEventT_linkExpEventT[ev->getDestinationEventType()];
+		int nextEventType = nodeExpEventT_linkExpEventT[ev->getDestEventType()];
 		// generate POST-LINK EVENT, enqueue to eventsList
-		Event newEvent(ev->getApplicationId(), ev->getEventTime(), ev->getNeededResQuantity(), 0.0, nextEventType, ev->getDestinationEventType(),
+		Event newEvent(ev->getAppID(), ev->getEventTime(), ev->getNeededResQuantity(), 0.0, nextEventType, ev->getDestEventType(),
 				   ev->getEventBehavior(), ev->getEntityIns().getEntityType(), SEIZEFROMMASTER, ev->getEntityIns().getAttribute(), ev->getFsLoc(), ev->getFsId(), ev->getRedId());
 		eventsList.push(newEvent);
 	}

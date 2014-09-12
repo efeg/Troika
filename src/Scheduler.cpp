@@ -80,19 +80,17 @@ double Scheduler::getQueueCapacity(size_t queueIndex) const {
 	if (queueIndex < queueCapacities_.size()) {
 		return queueCapacities_.at(queueIndex);
 	}
-	std::cerr
-			<< "Index out of bound in Scheduler Queues - queue index must be in [(# of queues)-1]"
-			<< std::endl;
+	std::cerr << "Index out of bound in Scheduler Queues - queue index must be in [(# of queues)-1]" << std::endl;
 	return -1;
 }
 
-// nodemanagerEventType = schedulerSubmitNewApp(ev->getApplicationId());
+// nodemanagerEventType = schedulerSubmitNewApp(ev->getAppID());
 // using app id, scheduler will determine the app. then using app it will determine which queue it will
 // submit to and whether that queue has enough resource for AM of app.
 // if there are available resources (amResourceMB, amCpuVcores) for it in some node, it will give that
 // resource to it. it will scan the worker nodes in order to determine if space exists..
 
-int Scheduler::schedulerSubmitNewApp(size_t appId){
+int Scheduler::schedulerSubmitNewApp(size_t appId, int outputEventType){
 
 	// the queue that the application will be submitted to...
 	int queueID = (applications.at(appId))->getQueueId();
@@ -111,7 +109,7 @@ int Scheduler::schedulerSubmitNewApp(size_t appId){
 	// check if there's enough resources in app's queue for the AM
 	if (amResourcesMB <= (maxAmResourcePercent_ * queueRemainingMemoryCapacities_.at(queueID)) && cpuSatisfactionCheck) {
 
-		// find a worker node (a node with a node master) that contains these resources
+		// find a worker node (a node with a node manager) that contains these resources
 		for (size_t i=0; i < workerNodeExpectedEventTypes_.size(); i++) {
 
 			if(nodeExpEventT_nodeType[workerNodeExpectedEventTypes_.at(i)] == RESOURCEMANAGER){
@@ -136,7 +134,7 @@ int Scheduler::schedulerSubmitNewApp(size_t appId){
 				// decrease the seized queue resources
 				queueRemainingMemoryCapacities_.at(queueID) -= amResourcesMB;
 				#ifndef TERMINAL_LOG_DISABLED
-				std::cout << "queueRemainingMemoryCapacities_ amResourcesMB "<< queueRemainingMemoryCapacities_.at(0) << std::endl;
+				std::cout << "queueRemainingMemoryCapacities_ amResourcesMB "<< queueRemainingMemoryCapacities_.at(queueID) << std::endl;
 				#endif
 
 				// return the eventType of the node that contain these resources
@@ -144,18 +142,30 @@ int Scheduler::schedulerSubmitNewApp(size_t appId){
 			}
 		}
 
+		struct amScheduleData pendingApp;
+		pendingApp.appId_ = appId;
+		pendingApp.outputEventType_ = outputEventType;
+		containerPendingAppQueue_[(applications.at(appId))->getQueueId()].push(pendingApp);
+		#ifndef TERMINAL_LOG_DISABLED
 		// if a worker node cannot be found, application cannot be submitted
 		std::cerr << "Insufficient RESOURCES AT WORKER NODES FOR APP MASTER! AppId: " << appId << std::endl;
+		#endif
 	}
 	else {
-		std::cerr << "Insufficient RESOURCES FOR APP MASTER! AppId: " << appId << std::endl;
+		struct amScheduleData pendingApp;
+		pendingApp.appId_ = appId;
+		pendingApp.outputEventType_ = outputEventType;
+		containerPendingAppQueue_[(applications.at(appId))->getQueueId()].push(pendingApp);
+		#ifndef TERMINAL_LOG_DISABLED
+		std::cout << "Insufficient RESOURCES FOR APP MASTER! AppId: " << appId << std::endl;
+		#endif
 	}
 	return -1;
 }
 
-void Scheduler::incnodeId_maxNumberOfMapTaskPerNode(int fsloc){
+void Scheduler::incnodeId_maxNumberOfMapTaskPerNode(int fsloc, int appID){
 
-	if ( !maxAlreadySet_) {	// (max is not set for each node)
+	if (!maxAlreadySet_) {	// (max is not set for each node)
 		// increment map counter for nodeId
 		if ( nodeId_maxNumberOfMapTaskPerNode.find(fsloc) == nodeId_maxNumberOfMapTaskPerNode.end() ) {	// not found
 			nodeId_maxNumberOfMapTaskPerNode[fsloc] = 1;
@@ -170,26 +180,27 @@ int Scheduler::getnodeId_maxNumberOfMapTaskPerNode(int nodeID){
 	return nodeId_maxNumberOfMapTaskPerNode[nodeID];
 }
 
+void Scheduler::setWaitingTaskInfo(waitingTaskInfo &info, size_t appID, int taskLocation, int attr, int fsID, int outEvent, bool taskType){
+	info.appId = appID;
+	info.taskLocation = taskLocation;
+	info.attr = attr;
+	info.fsid = fsID;
+	info.outEvent = outEvent;
+	info.taskType = taskType;	// false: map true: reducer
+}
 
 struct waitingTaskInfo Scheduler::schedulerGetMapperLocation(size_t appId, int fileSplitLocationExpectedEventType, bool wakeUpSignal, int outEvent, int attr, int fsid){
 
 	struct waitingTaskInfo mapInf;
-	mapInf.appId = appId;
-	mapInf.outEvent = outEvent;
-	mapInf.attr = attr;
-	mapInf.fsid = fsid;
-	mapInf.taskType = false;	// false: map true: reducer
+	setWaitingTaskInfo(mapInf, appId, -1, attr, fsid, outEvent, false);
 
-	size_t neededMemory = (applications.at(appId))->getMapreduceMapMemory();
+	size_t neededMemory = ONE_MB_IN_BYTES * (applications.at(appId))->getMapreduceMapMemory();
 	int neededCpu = (applications.at(appId))->getMapCpuVcores();
-	neededMemory *= ONE_MB_IN_BYTES;
 	bool cpuRelatedCheck =true;
 
 	if (neededMemory > (maxAllocMB_*ONE_MB_IN_BYTES) || (isResourceCalculator() && (neededCpu > maxAllocVcores_))) {
-		std::cerr << "Maximum allocation allowance per container is exceeded in mapper scheduler: "
-				<< appId << std::endl;
+		std::cerr << "Maximum allocation allowance per container is exceeded in map task scheduler: " << appId << std::endl;
 		maxAlreadySet_ = true; // cannot run any map task at any node.
-		mapInf.taskLocation = -1;
 		return mapInf;
 	}
 
@@ -215,31 +226,21 @@ struct waitingTaskInfo Scheduler::schedulerGetMapperLocation(size_t appId, int f
 	// initial submission for this filesplit
 	if(!wakeUpSignal){
 
-		if ((allocatedMemory > queueRemainingMemoryCapacities_.at((applications.at(appId))->getQueueId()))
+		if (allocatedMemory > queueRemainingMemoryCapacities_.at((applications.at(appId))->getQueueId())
 				|| (isResourceCalculator() && (allocatedCpu > queueRemainingCoreCapacities_.at((applications.at(appId))->getQueueId())))){
-#ifndef TERMINAL_LOG_DISABLED
-			std::cout << "Insufficient RESOURCES FOR MAPPER! AppId: " << appId
-					<< std::endl;
-#endif
-
-
-			//Put them all to a wait list (suspend)! do the same for reducers...
-
-			struct waitingTaskInfo info;
-
-			info.appId = appId;
-			info.taskLocation = fileSplitLocationExpectedEventType;
-			info.attr = attr;
-			info.fsid = fsid;
-			info.outEvent = outEvent;
-			info.taskType = false;
-
-			waitingMapperQueue_.push(info);
 			#ifndef TERMINAL_LOG_DISABLED
-			std::cout << "Mapper waiting list size: " << waitingMapperQueue_.size() << std::endl;
+			std::cout << "Insufficient RESOURCES FOR MAPPER! AppId: " << appId << std::endl;
+			#endif
+
+			//Put them all to a wait list (suspend)! set the waiting task properties...
+			struct waitingTaskInfo info;
+			setWaitingTaskInfo(info, appId, fileSplitLocationExpectedEventType, attr, fsid, outEvent, false);
+			waitingMapperQueue_[(applications.at(appId))->getQueueId()].push(info);
+
+			#ifndef TERMINAL_LOG_DISABLED
+			std::cout << "Map task waiting list size: " << waitingMapperQueue_[(applications.at(appId))->getQueueId()].size() << std::endl;
 			#endif
 			maxAlreadySet_ = true; // cannot run any more map task at any node.
-			mapInf.taskLocation = -1;
 			return mapInf;
 		}
 
@@ -251,8 +252,7 @@ struct waitingTaskInfo Scheduler::schedulerGetMapperLocation(size_t appId, int f
 		}
 
 		// first check if local node has the needed resources
-		if (nodeExpEventT_nodeType[fileSplitLocationExpectedEventType] != RESOURCEMANAGER
-			&& cpuRelatedCheck
+		if (nodeExpEventT_nodeType[fileSplitLocationExpectedEventType] != RESOURCEMANAGER && cpuRelatedCheck
 			&& nodeExpEventT_remainingCap[fileSplitLocationExpectedEventType].remainingMemoryCapacity >= allocatedMemory) {
 
 			if(isResourceCalculator()){
@@ -260,11 +260,10 @@ struct waitingTaskInfo Scheduler::schedulerGetMapperLocation(size_t appId, int f
 				queueRemainingCoreCapacities_.at((applications.at(appId))->getQueueId()) -= allocatedCpu;
 			}
 
-
 			// seize those resource (real CPU will cease it when the event is received by the corresponding worker node)
 			nodeExpEventT_remainingCap[fileSplitLocationExpectedEventType].remainingMemoryCapacity -= allocatedMemory;
 
-			// set seized resource per mapper for application
+			// set seized resource per map task for application
 			// note that setSeizedMapCpuVcores in any case. If default resource scheduler is used it will always be the default requested amount
 			(applications.at(appId))->setSeizedMapCpuVcores(allocatedCpu);
 			(applications.at(appId))->setSeizedMapreduceMapMemory(allocatedMemory);
@@ -272,16 +271,13 @@ struct waitingTaskInfo Scheduler::schedulerGetMapperLocation(size_t appId, int f
 			// decrease the seized queue resources
 			queueRemainingMemoryCapacities_.at((applications.at(appId))->getQueueId()) -= allocatedMemory;
 
-
 			// return the eventType of the node that contain these resources
 			mapInf.taskLocation = fileSplitLocationExpectedEventType;
-			incnodeId_maxNumberOfMapTaskPerNode(fileSplitLocationExpectedEventType);
+			incnodeId_maxNumberOfMapTaskPerNode(fileSplitLocationExpectedEventType, appId);
 			return mapInf;
-
 		}
 		// if local node was not available (or if it is the RESOURCEMANAGER) try finding a node in the same rack
 		// if all the nodes are unavailable in the same rack, pick a random available node
-
 		// rack id of fileSplit Location;
 		int rackEventType = nodeExpEventT_switchExpEventT[fileSplitLocationExpectedEventType];
 		int eventType, backupEvent;
@@ -294,16 +290,13 @@ struct waitingTaskInfo Scheduler::schedulerGetMapperLocation(size_t appId, int f
 			if(isResourceCalculator()){
 				cpuRelatedCheck = nodeExpEventT_remainingCap[eventType].remainingCpuCapacity >= allocatedCpu;
 			}
-
 			if (rackEventType == nodeExpEventT_switchExpEventT[eventType]
-	 		     && nodeExpEventT_nodeType[eventType] != RESOURCEMANAGER
-				 && cpuRelatedCheck
+	 		     && nodeExpEventT_nodeType[eventType] != RESOURCEMANAGER && cpuRelatedCheck
 				 && nodeExpEventT_remainingCap[eventType].remainingMemoryCapacity >= allocatedMemory) {
 
 				if(isResourceCalculator()){
 					nodeExpEventT_remainingCap[eventType].remainingCpuCapacity -= allocatedCpu;
 					queueRemainingCoreCapacities_.at((applications.at(appId))->getQueueId()) -= allocatedCpu;
-
 				}
 
 				// seize those resource (real CPU will cease it when the event is received by the corresponding worker node)
@@ -318,19 +311,15 @@ struct waitingTaskInfo Scheduler::schedulerGetMapperLocation(size_t appId, int f
 				queueRemainingMemoryCapacities_.at((applications.at(appId))->getQueueId()) -= allocatedMemory;
 
 				mapInf.taskLocation = eventType;
-				incnodeId_maxNumberOfMapTaskPerNode(eventType);
+				incnodeId_maxNumberOfMapTaskPerNode(eventType, appId);
 				return mapInf;
 			}
 
-			else if (!backupFound
-					&& nodeExpEventT_nodeType[eventType] != RESOURCEMANAGER
-					&& cpuRelatedCheck
+			else if (!backupFound && nodeExpEventT_nodeType[eventType] != RESOURCEMANAGER && cpuRelatedCheck
 					&& nodeExpEventT_remainingCap[eventType].remainingMemoryCapacity >= allocatedMemory) {
-
 				backupFound = true;
 				backupEvent = eventType;
 			}
-
 		}
 
 		if (backupFound) {
@@ -349,13 +338,11 @@ struct waitingTaskInfo Scheduler::schedulerGetMapperLocation(size_t appId, int f
 			queueRemainingMemoryCapacities_.at((applications.at(appId))->getQueueId()) -= allocatedMemory;
 
 			mapInf.taskLocation = backupEvent;
-			incnodeId_maxNumberOfMapTaskPerNode(backupEvent);
+			incnodeId_maxNumberOfMapTaskPerNode(backupEvent, appId);
 			return mapInf;
 		}
 	}
-
 	else{
-
 
 		// search for a node that has available resources at least as much as allocatedMemory and allocatedCpu
 		// prefer the local node if possible, else check another node in the same rack else get any available node
@@ -363,10 +350,8 @@ struct waitingTaskInfo Scheduler::schedulerGetMapperLocation(size_t appId, int f
 		if(isResourceCalculator()){
 			cpuRelatedCheck = nodeExpEventT_remainingCap[fileSplitLocationExpectedEventType].remainingCpuCapacity >= allocatedCpu;
 		}
-
 		// first check if local node has the needed resources
-		if (nodeExpEventT_nodeType[fileSplitLocationExpectedEventType] != RESOURCEMANAGER
-			&& cpuRelatedCheck
+		if (nodeExpEventT_nodeType[fileSplitLocationExpectedEventType] != RESOURCEMANAGER && cpuRelatedCheck
 			&& nodeExpEventT_remainingCap[fileSplitLocationExpectedEventType].remainingMemoryCapacity >= allocatedMemory) {
 
 			if(isResourceCalculator()){
@@ -384,12 +369,11 @@ struct waitingTaskInfo Scheduler::schedulerGetMapperLocation(size_t appId, int f
 			// decrease the seized queue resources
 			queueRemainingMemoryCapacities_.at((applications.at(appId))->getQueueId()) -= allocatedMemory;
 
-
 			// return the eventType of the node that contain these resources
 			mapInf.taskLocation = fileSplitLocationExpectedEventType;
 			return mapInf;
-
 		}
+
 		// if local node was not available (or if it is the RESOURCEMANAGER) try finding a node in the same rack
 		// if all the nodes are unavailable in the same rack, pick a random available node
 
@@ -428,9 +412,7 @@ struct waitingTaskInfo Scheduler::schedulerGetMapperLocation(size_t appId, int f
 				return mapInf;
 			}
 
-			else if (!backupFound
-					&& nodeExpEventT_nodeType[eventType] != RESOURCEMANAGER
-					&& cpuRelatedCheck
+			else if (!backupFound && nodeExpEventT_nodeType[eventType] != RESOURCEMANAGER && cpuRelatedCheck
 					&& nodeExpEventT_remainingCap[eventType].remainingMemoryCapacity >= allocatedMemory) {
 
 				backupFound = true;
@@ -458,24 +440,19 @@ struct waitingTaskInfo Scheduler::schedulerGetMapperLocation(size_t appId, int f
 			mapInf.taskLocation = backupEvent;
 			return mapInf;
 		}
-
 	}
 
+	#ifndef TERMINAL_LOG_DISABLED
 	// no node has enough resources for the mapper
 	std::cerr << "Not enough resources for the mapper: " << appId << std::endl;
+	#endif
 
 	struct waitingTaskInfo info;
+	setWaitingTaskInfo(info, appId, fileSplitLocationExpectedEventType, attr, fsid, outEvent, false);
+	waitingMapperQueue_[(applications.at(appId))->getQueueId()].push(info);
 
-	info.appId = appId;
-	info.taskLocation = fileSplitLocationExpectedEventType;
-	info.attr = attr;
-	info.fsid = fsid;
-	info.outEvent = outEvent;
-	info.taskType = false;
-
-	waitingMapperQueue_.push(info);
 	#ifndef TERMINAL_LOG_DISABLED
-	std::cout << "Mapper waiting list size: " << waitingMapperQueue_.size() << std::endl;
+	std::cout << "Map task waiting list size: " << waitingMapperQueue_[(applications.at(appId))->getQueueId()].size() << std::endl;
 	#endif
 
 	mapInf.taskLocation = -1;
@@ -485,9 +462,7 @@ struct waitingTaskInfo Scheduler::schedulerGetMapperLocation(size_t appId, int f
 struct waitingTaskInfo Scheduler::schedulerGetReducerLocation(size_t appId, bool wakeUpSignal, int outEvent){
 
 	struct waitingTaskInfo redInf;
-	redInf.appId = appId;
-	redInf.outEvent = outEvent;
-	redInf.taskType = true;
+	setWaitingTaskInfo(redInf, appId, -1, -1, -1, outEvent, true);
 
 	size_t neededMemory = (applications.at(appId))->getMapreduceReduceMemory();
 	int neededCpu = (applications.at(appId))->getReduceCpuVcores();
@@ -495,12 +470,9 @@ struct waitingTaskInfo Scheduler::schedulerGetReducerLocation(size_t appId, bool
 	bool cpuRelatedCheck =true;
 
 	if (neededMemory > (maxAllocMB_*ONE_MB_IN_BYTES) || (isResourceCalculator() && (neededCpu > maxAllocVcores_))) {
-		std::cerr << "Maximum allocation allowance per container is exceeded in reducer scheduler: "
-				<< appId << std::endl;
-		redInf.taskLocation = -1;
+		std::cerr << "ERROR: Maximum allocation allowance per container is exceeded in reducer scheduler || AppID: " << appId << std::endl;
 		return redInf;
 	}
-
 	size_t allocatedMemory;
 	int allocatedCpu = neededCpu;
 
@@ -522,27 +494,20 @@ struct waitingTaskInfo Scheduler::schedulerGetReducerLocation(size_t appId, bool
 
 	if(!wakeUpSignal){
 
-		if ((allocatedMemory > queueRemainingMemoryCapacities_.at((applications.at(appId))->getQueueId()))
+		if (allocatedMemory > queueRemainingMemoryCapacities_.at((applications.at(appId))->getQueueId())
 				|| (isResourceCalculator() && (allocatedCpu > queueRemainingCoreCapacities_.at((applications.at(appId))->getQueueId())))){
 			#ifndef TERMINAL_LOG_DISABLED
-			std::cerr << "Insufficient RESOURCES FOR REDUCER! AppId: " << appId
-					<< std::endl;
-
+			std::cerr << "WARNING: Insufficient RESOURCES FOR REDUCER || AppId: " << appId << " allocatedMemory: " << allocatedMemory << " remaining capacity " << queueRemainingMemoryCapacities_.at((applications.at(appId))->getQueueId()) << std::endl;
 			#endif
 
-			//Put them all to a wait list (suspend)! do the same for reducers...
-
+			// Put them all to a wait list (suspend)!
 			struct waitingTaskInfo info;
+			setWaitingTaskInfo(info, appId, -1, -1, -1, outEvent, true);
+			waitingReducerQueue_[(applications.at(appId))->getQueueId()].push(info);
 
-			info.appId = appId;
-			info.outEvent = outEvent;
-			info.taskType = true;
-
-			waitingReducerQueue_.push(info);
 			#ifndef TERMINAL_LOG_DISABLED
-			std::cout << "Reducer waiting list size: " << waitingReducerQueue_.size() << std::endl;
+			std::cout << "Reducer waiting list size: " << waitingReducerQueue_[(applications.at(appId))->getQueueId()].size() << std::endl;
 			#endif
-			redInf.taskLocation = -1;
 			return redInf;
 		}
 
@@ -555,9 +520,7 @@ struct waitingTaskInfo Scheduler::schedulerGetReducerLocation(size_t appId, bool
 			if(isResourceCalculator()){
 				cpuRelatedCheck = nodeExpEventT_remainingCap[eventType].remainingCpuCapacity >= allocatedCpu;
 			}
-
-			if (cpuRelatedCheck
-					&& nodeExpEventT_nodeType[eventType] != RESOURCEMANAGER
+			if (cpuRelatedCheck && nodeExpEventT_nodeType[eventType] != RESOURCEMANAGER
 					&& nodeExpEventT_remainingCap[eventType].remainingMemoryCapacity >= allocatedMemory) {
 
 				int queueID = (applications.at(appId))->getQueueId();
@@ -565,7 +528,6 @@ struct waitingTaskInfo Scheduler::schedulerGetReducerLocation(size_t appId, bool
 				if(isResourceCalculator()){
 					nodeExpEventT_remainingCap[eventType].remainingCpuCapacity -= allocatedCpu;
 					queueRemainingCoreCapacities_.at(queueID) -= allocatedCpu;
-
 				}
 				// seize those resource (real CPU will cease it when the event is received by the corresponding worker node)
 				nodeExpEventT_remainingCap[eventType].remainingMemoryCapacity -= allocatedMemory;
@@ -577,13 +539,13 @@ struct waitingTaskInfo Scheduler::schedulerGetReducerLocation(size_t appId, bool
 				// decrease the seized queue resources
 				queueRemainingMemoryCapacities_.at(queueID) -= allocatedMemory;
 
-
 				redInf.taskLocation = eventType;
 				return redInf;
 			}
 		}
 	}
 	else{
+
 		int eventType;
 		// search for a node that has available resources at least as much as allocatedMemory and allocatedCpu
 		// no need to prefer a local node
@@ -594,8 +556,7 @@ struct waitingTaskInfo Scheduler::schedulerGetReducerLocation(size_t appId, bool
 			if(isResourceCalculator()){
 				cpuRelatedCheck = nodeExpEventT_remainingCap[eventType].remainingCpuCapacity >= allocatedCpu;
 			}
-
-			if ( cpuRelatedCheck
+			if (cpuRelatedCheck
 					&& nodeExpEventT_nodeType[eventType] != RESOURCEMANAGER
 					&& nodeExpEventT_remainingCap[eventType].remainingMemoryCapacity >= allocatedMemory) {
 
@@ -619,19 +580,18 @@ struct waitingTaskInfo Scheduler::schedulerGetReducerLocation(size_t appId, bool
 			}
 		}
 	}
-
+	#ifndef TERMINAL_LOG_DISABLED
 	// No node has enough resources for the reducer
-	std::cerr << "Not enough resources for the reducer: " << appId << std::endl;
+	std::cerr << "Not enough resources for the reduce task: " << appId << std::endl;
+	#endif
 
 	struct waitingTaskInfo info;
-	info.appId = appId;
-	info.outEvent = outEvent;
-	info.taskType = true;
-	waitingReducerQueue_.push(info);
+	setWaitingTaskInfo(info, appId, -1, -1, -1, outEvent, true);
+	waitingReducerQueue_[(applications.at(appId))->getQueueId()].push(info);
+
 	#ifndef TERMINAL_LOG_DISABLED
-	std::cout << "Reducer waiting list size: " << waitingReducerQueue_.size() << std::endl;
+	std::cout << "Reducer waiting list size: " << waitingReducerQueue_[(applications.at(appId))->getQueueId()].size() << std::endl;
 	#endif
-	redInf.taskLocation = -1;
 	return redInf;
 }
 
@@ -640,15 +600,12 @@ void Scheduler::updateQueueRemainingCapacities(int expectedEventType, int remain
 	workerNodeExpectedEventTypes_.push_back(expectedEventType);
 
 	if(!isRM){
-		for (size_t i = 0; i < queueCapacities_.size(); i++) {
+		for (size_t i = 0; i < queueCapacities_.size(); i++){
 			if(isResourceCalculator()){
-				queueRemainingCoreCapacities_.at(i) += (remainingCpuCapacity * ((queueCapacities_.at(i)) / 100));
+				queueRemainingCoreCapacities_.at(i) += (remainingCpuCapacity*0.01*queueCapacities_.at(i));
 			}
-
-			double memCapacity = (remainingMemoryCapacity * ((queueCapacities_.at(i)) / 100));
-
-			if(memCapacity >= (nodemanagerResManMB*ONE_MB_IN_BYTES)){
-				queueRemainingMemoryCapacities_.at(i) += (nodemanagerResManMB*ONE_MB_IN_BYTES);
+			if(remainingMemoryCapacity >= (nodemanagerResManMB*ONE_MB_IN_BYTES)){
+				queueRemainingMemoryCapacities_.at(i) += (nodemanagerResManMB*ONE_MB_IN_BYTES*0.01*queueCapacities_.at(i));
 			}
 			else{
 				std::cerr << "Inconsistent configuration for: yarn.nodemanager.resource.memory-mb or Insufficient physical memory for containers in nodemanager"<< std::endl;
@@ -668,16 +625,31 @@ int Scheduler::getMinAllocVcores() const {
 	return minAllocVcores_;
 }
 
-void Scheduler::schedulerReleaseAMresources(int appID){
-
+void Scheduler::schedulerReleaseAMresources(int appID, double outEventTime){
 	if(isResourceCalculator()){
 		nodeExpEventT_remainingCap[(applications.at(appID))->getAmEventType()].remainingCpuCapacity += (applications.at(appID))->getamCpuVcores();
 		queueRemainingCoreCapacities_.at((applications.at(appID))->getQueueId()) += (applications.at(appID))->getamCpuVcores();
 	}
-	nodeExpEventT_remainingCap[(applications.at(appID))->getAmEventType()].remainingMemoryCapacity += (applications.at(appID))->getAmResourceMb();
+	nodeExpEventT_remainingCap[(applications.at(appID))->getAmEventType()].remainingMemoryCapacity += ((applications.at(appID))->getAmResourceMb() * ONE_MB_IN_BYTES);
 
 	// release seized queue resources
-	queueRemainingMemoryCapacities_.at((applications.at(appID))->getQueueId()) += (applications.at(appID))->getAmResourceMb();
+	queueRemainingMemoryCapacities_.at((applications.at(appID))->getQueueId()) += ((applications.at(appID))->getAmResourceMb() * ONE_MB_IN_BYTES);
+
+	// now check if an application is pending..
+	if(!(containerPendingAppQueue_[(applications.at(appID))->getQueueId()].empty())){
+		struct amScheduleData suspendedAppID = containerPendingAppQueue_[(applications.at(appID))->getQueueId()].front();
+		containerPendingAppQueue_[(applications.at(appID))->getQueueId()].pop();
+		int nodemanagerEventType = schedulerSubmitNewApp(suspendedAppID.appId_, suspendedAppID.outputEventType_);
+
+		if(nodemanagerEventType != -1){
+			// create an event that has a scheduled AM
+			(applications.at(suspendedAppID.appId_))->setAmEventType(nodemanagerEventType);
+
+			// Event to start container (NODEMANAGER event behavior: START_AM_CONTAINER)
+			Event newEvent(suspendedAppID.appId_, outEventTime, HEARTBEAT_SIZE, 0.0, suspendedAppID.outputEventType_, nodemanagerEventType, START_AM_CONTAINER, OTHER);
+			eventsList.push(newEvent);
+		}
+	}
 }
 
 struct waitingTaskInfo Scheduler::schedulerReleaseReducerresources(int appID, int nodeEventType){
@@ -685,36 +657,29 @@ struct waitingTaskInfo Scheduler::schedulerReleaseReducerresources(int appID, in
 	if(isResourceCalculator()){
 		nodeExpEventT_remainingCap[nodeEventType].remainingCpuCapacity += (applications.at(appID))->getSeizedReduceCpuVcores();
 		queueRemainingCoreCapacities_.at((applications.at(appID))->getQueueId()) += (applications.at(appID))->getSeizedReduceCpuVcores();
-
 	}
-
 	nodeExpEventT_remainingCap[nodeEventType].remainingMemoryCapacity += (applications.at(appID))->getSeizedMapreduceReduceMemory();
 
 	// release the seized queue resources
 	queueRemainingMemoryCapacities_.at((applications.at(appID))->getQueueId()) += (applications.at(appID))->getSeizedMapreduceReduceMemory();
 
-
 	// check if there are any waiting reducer tasks. If there are any, then let it wake up
-	if(waitingReducerQueue_.size() > 0){
+	if(waitingReducerQueue_[(applications.at(appID))->getQueueId()].size() > 0){
 		// call schedulerGetReducerLocation() with wake up signal
+		size_t appId = waitingReducerQueue_[(applications.at(appID))->getQueueId()].front().appId;
+		int outEvent = waitingReducerQueue_[(applications.at(appID))->getQueueId()].front().outEvent;
 
-		size_t appId = waitingReducerQueue_.front().appId;
-		int outEvent = waitingReducerQueue_.front().outEvent;
-
-		waitingReducerQueue_.pop();
-
+		waitingReducerQueue_[(applications.at(appID))->getQueueId()].pop();
 		return schedulerGetReducerLocation(appId, true, outEvent);
 	}
-	else if(waitingMapperQueue_.size() > 0){
+	else if(waitingMapperQueue_[(applications.at(appID))->getQueueId()].size() > 0){
 		// call schedulerGetMapperLocation() with wake up signal
-
-		size_t appId = waitingMapperQueue_.front().appId;
-		int fileSplitLocationExpectedEventType = waitingMapperQueue_.front().taskLocation;
-		int attr = waitingMapperQueue_.front().attr;
-		int fsid = waitingMapperQueue_.front().fsid;
-		int outEvent = waitingMapperQueue_.front().outEvent;
-
-		waitingMapperQueue_.pop();
+		size_t appId = waitingMapperQueue_[(applications.at(appID))->getQueueId()].front().appId;
+		int fileSplitLocationExpectedEventType = waitingMapperQueue_[(applications.at(appID))->getQueueId()].front().taskLocation;
+		int attr = waitingMapperQueue_[(applications.at(appID))->getQueueId()].front().attr;
+		int fsid = waitingMapperQueue_[(applications.at(appID))->getQueueId()].front().fsid;
+		int outEvent = waitingMapperQueue_[(applications.at(appID))->getQueueId()].front().outEvent;
+		waitingMapperQueue_[(applications.at(appID))->getQueueId()].pop();
 
 		return schedulerGetMapperLocation(appId, fileSplitLocationExpectedEventType, true, outEvent, attr, fsid);
 	}
@@ -727,67 +692,63 @@ struct waitingTaskInfo Scheduler::schedulerReleaseReducerresources(int appID, in
 }
 
 bool Scheduler::isReleasedAlready(int appID, int fsID){
-
 	if((applications.at(appID))->hasReleasedMapperResources(fsID)){
 		return true;
 	}
-	else{
-		(applications.at(appID))->addReleasedMapper(fsID);
-		return false;
-	}
+	(applications.at(appID))->addReleasedMapper(fsID);
+	return false;
 }
 
 struct waitingTaskInfo Scheduler::schedulerReleaseMapperresources(int appID, int nodeEventType, int fsID){
-
 	bool isReleased = isReleasedAlready(appID, fsID);
 
 	if(!isReleased){
-
 		if(isResourceCalculator()){
 			nodeExpEventT_remainingCap[nodeEventType].remainingCpuCapacity += (applications.at(appID))->getSeizedMapCpuVcores();
 			queueRemainingCoreCapacities_.at((applications.at(appID))->getQueueId()) += (applications.at(appID))->getSeizedMapCpuVcores();
-
 		}
-
 		nodeExpEventT_remainingCap[nodeEventType].remainingMemoryCapacity += (applications.at(appID))->getSeizedMapreduceMapMemory();
 
 		// release the seized queue resources
 		queueRemainingMemoryCapacities_.at((applications.at(appID))->getQueueId()) += (applications.at(appID))->getSeizedMapreduceMapMemory();
 
-
 		// check if there are any waiting reducer tasks. If there are any, then let it wake up
-		if(waitingReducerQueue_.size() > 0){
+		if(waitingReducerQueue_[(applications.at(appID))->getQueueId()].size() > 0){
 
-			size_t appId = waitingReducerQueue_.front().appId;
-			int outEvent = waitingReducerQueue_.front().outEvent;
-
-			waitingReducerQueue_.pop();
+			size_t appId = waitingReducerQueue_[(applications.at(appID))->getQueueId()].front().appId;
+			int outEvent = waitingReducerQueue_[(applications.at(appID))->getQueueId()].front().outEvent;
+			waitingReducerQueue_[(applications.at(appID))->getQueueId()].pop();
 
 			return schedulerGetReducerLocation(appId, true, outEvent);
 		}
-		else if(waitingMapperQueue_.size() > 0){
+		else if(waitingMapperQueue_[(applications.at(appID))->getQueueId()].size() > 0){
 			// call schedulerGetMapperLocation() with wake up signal
 
-			size_t appId = waitingMapperQueue_.front().appId;
-			int fileSplitLocationExpectedEventType = waitingMapperQueue_.front().taskLocation;
-			int attr = waitingMapperQueue_.front().attr;
-			int fsid = waitingMapperQueue_.front().fsid;
-			int outEvent = waitingMapperQueue_.front().outEvent;
-
-			waitingMapperQueue_.pop();
+			size_t appId = waitingMapperQueue_[(applications.at(appID))->getQueueId()].front().appId;
+			int fileSplitLocationExpectedEventType = waitingMapperQueue_[(applications.at(appID))->getQueueId()].front().taskLocation;
+			int attr = waitingMapperQueue_[(applications.at(appID))->getQueueId()].front().attr;
+			int fsid = waitingMapperQueue_[(applications.at(appID))->getQueueId()].front().fsid;
+			int outEvent = waitingMapperQueue_[(applications.at(appID))->getQueueId()].front().outEvent;
+			waitingMapperQueue_[(applications.at(appID))->getQueueId()].pop();
 
 			return schedulerGetMapperLocation(appId, fileSplitLocationExpectedEventType, true, outEvent, attr, fsid);
 		}
 	}
-
 	// no waiting mapper task exists
 	struct waitingTaskInfo mapInf;
 	mapInf.taskLocation = -2;
 	mapInf.taskType = false;
-
 	return mapInf;
 }
 
 bool Scheduler::isResourceCalculator() const {
 	return resourceCalculator_;
+}
+
+size_t Scheduler::getMaxNumberOfAppsAtQueue(size_t queueIndex){
+	// required resources for AM
+	size_t amResourcesMB = (applications.at(0))->getAmResourceMb();
+	amResourcesMB *= ONE_MB_IN_BYTES;
+
+	return ((maxAmResourcePercent_ * queueRemainingMemoryCapacities_.at(queueIndex))/amResourcesMB) + 1;
 }

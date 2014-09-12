@@ -41,10 +41,9 @@
 #define MAPREDUCE_MAP_SORT_SPILL_PERCENT 0.8				// mapreduce.map.sort.spill.percent /* Note: must be over 0.5*/
 #define MAPREDUCE_TASK_IO_SORT_FACTOR 10					// mapreduce.task.io.sort.factor
 #define MAPREDUCE_JOB_REDUCE_SLOWSTART_COMPLETEDMAPS 0.05	// mapreduce.job.reduce.slowstart.completedmaps
-
 // Note: In YARN, it is no longer necessary to adjust io.sort.record.percent!
-#define MAPREDUCE_REDUCE_SHUFFLEMERGE_PERCENT 0.66			// .mapreduce.reduce.shuffle.merge.percent
-#define MAPREDUCE_REDUCE_SHUFFLE_INPUT_BUFFER_PERCENT 0.7	// .mapreduce.reduce.shuffle.input.buffer.percent
+#define MAPREDUCE_REDUCE_SHUFFLEMERGE_PERCENT 0.66			// mapreduce.reduce.shuffle.merge.percent
+#define MAPREDUCE_REDUCE_SHUFFLE_INPUT_BUFFER_PERCENT 0.7	// mapreduce.reduce.shuffle.input.buffer.percent
 #define MAPREDUCE_REDUCE_INPUT_BUFFER_PERCENT 0.0 			// mapreduce.reduce.input.buffer.percent				// TODO: integrate this parameter to simulation
 #define MAPREDUCE_REDUCE_SHUFFLE_PARALLELCOPIES 5			// mapreduce.reduce.shuffle.parallelcopies				// TODO: integrate this parameter to simulation
 #define MAPRED_CHILD_JAVA_OPTS 200							// mapred.child.java.opts Default: 200MB
@@ -62,9 +61,7 @@ public:
 			double mapreduce_job_reduce_slowstart_completedmaps=MAPREDUCE_JOB_REDUCE_SLOWSTART_COMPLETEDMAPS, double mapred_child_java_opts=MAPRED_CHILD_JAVA_OPTS);
 	virtual ~MapReduceConf();
 
-	size_t getFileSplitSize() const;
-
-	void setFileSplitSize(size_t fsSize);
+	size_t getFsSize() const;
 
 	int getMapreduceJobReduces() const;
 

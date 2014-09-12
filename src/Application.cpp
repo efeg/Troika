@@ -47,24 +47,22 @@ Application::Application (size_t applicationSize, size_t applicationOwnerID, dou
 							mapCpuVcores_(mapCpuVcores), reduceCpuVcores_(reduceCpuVcores),
 							mapreduceMapMemory_(mapreduceMapMemory), mapreduceReduceMemory_(mapreduceReduceMemory),
 							amResourceMB_(amResourceMB), amCpuVcores_(amCpuVcores),
-							isThereACombiner_(false), completedMapperCount_(0),
-							combinerIntensity_(0), combinerCompressionPercent_(0),
-							totalMapFinishTime_(0), totalReduceFinishTime_(0),
-							totalShuffleFinishTime_(0), numberOfCompletedReducers_(0),
-							seized_mapCpuVcores_(0), seized_reduceCpuVcores_(0),
+							isThereACombiner_(false), imReadyToShuffle_(false), completedMapperCount_(0),
+							numberOfCompletedReducers_(0), combinerIntensity_(0), combinerCompressionPercent_(0),
+							totalMapFinishTime_(0), totalReduceFinishTime_(0), totalShuffleFinishTime_(0),
+							seized_mapCpuVcores_(0), seized_reduceCpuVcores_(0), amEventType_(-1),
 							seized_mapreduceMapMemory_(0), seized_mapreduceReduceMemory_(0),
-							imReadyToShuffle_(false), shuffleMergeLimit_(0),
-							wb_completed_(0), amEventType_(-1),
-							reduceStartTime_(-1), reduceFinishTime_(-1),
-							mapStartTime_(-1), mapFinishTime_(-1)
+							shuffleMergeLimit_(0), wb_completed_(0), reduceStartTime_(-1), reduceFinishTime_(-1),
+							mapStartTime_(-1), mapFinishTime_(-1), appStartTime_(-1), reduceCount_(0)
 							 {
+
 	releasedMappers_ = {};
 
 	// get last filesplit event type
 	lastFileSplitExpectedNodeEvent_ = fileSplitExpectedNodeEvents_.back();
 	totalNumberOfMappers_ = fileSplitExpectedNodeEvents_.size();
 
-	fileSplitSize_ = mapReduceConfig_.getFileSplitSize();
+	fileSplitSize_ = mapReduceConfig_.getFsSize();
 	lastFileSplitSize_ = applicationSize_ % fileSplitSize_;
 
 	if (lastFileSplitSize_ == 0){
@@ -75,7 +73,7 @@ Application::Application (size_t applicationSize, size_t applicationOwnerID, dou
 		remainingSplitsToBeProcessed_ = ((applicationSize_ - lastFileSplitSize_)/ fileSplitSize_) + 1;
 	}
 
-	// how many spills will be created
+	// determine number of spills to be created
 	size_t mapreduceTaskIOSortMb = mapReduceConfig_.getMapreduceTaskIoSortMb();
 
 	if(fileSplitSize_ % (mapreduceTaskIOSortMb << 20) == 0){
@@ -92,24 +90,13 @@ Application::Application (size_t applicationSize, size_t applicationOwnerID, dou
 		totalExpectedNumberofSpillsLast_= (lastFileSplitSize_ / (mapreduceTaskIOSortMb << 20)) +1;
 	}
 
-	// Create first event in eventslist
-
 	/*
-	 * Initial Application submission event arrives at time 0
+	 * Initial Application submission event
 	 * DOC: eventBehavior: SUBMIT_JOB means "Submit application" for Client Node
 	 *
 	 */
-
 	// Application enters to the system (run application command is sent)
-	Event newEvent(applicationID_, simulationTime, 0.0, 0.0, clientEventType_, clientEventType_,
-			SUBMIT_JOB, APPLICATION);
-
-	eventsList.push(newEvent);
-
-	for(int i=0;i<mapReduceConfig_.getMapreduceJobReduces();i++){
-		shuffleStartTime_[i]=-1;
-		shuffleFinishTime_[i]=-1;
-	}
+	pendingAppEventList.push_back(std::make_shared<Event>(applicationID_, -1, 0.0, 0.0, clientEventType_, clientEventType_, SUBMIT_JOB, APPLICATION));
 
 	reducersRequested_ = false;
 }
@@ -119,10 +106,6 @@ Application::~Application() {
 
 void Application::saveReadyToShuffleInfo(int fsID, int nodeEventType, double size){
 	readyToShuffleInfo_.push_back({fsID, nodeEventType, size});
-}
-
-void Application::saveSpillInfo(int fsID, int nodeEventType, double size){
-	spillInfo_.push_back({fsID, nodeEventType, size});
 }
 
 void Application::saveReducerCompletionWaiters(double neededResQuantity, int myDest, int attribute, int fsID, int outputEventType){
@@ -153,15 +136,15 @@ size_t Application::getNumberOfMappers(){
 	return ((applicationSize_/ fileSplitSize_) +1);
 }
 
-size_t Application::getApplicationId() const {
+size_t Application::getAppID() const {
 	return applicationID_;
 }
 
-size_t Application::getApplicationOwnerId() const {
+size_t Application::getAppOwnerID() const {
 	return applicationOwnerID_;
 }
 
-size_t Application::getApplicationSize() const {
+size_t Application::getAppSize() const {
 	return applicationSize_;
 }
 
@@ -181,15 +164,11 @@ const MapReduceConf& Application::getMapReduceConfig() const {
 	return mapReduceConfig_;
 }
 
-size_t Application::getFileSplitSize(int fileSplitID) {
+size_t Application::getFsSize(int fileSplitID) {
 	if((size_t)fileSplitID == (fileSplitExpectedNodeEvents_.size() -1)){	// lastSplit
 		return lastFileSplitSize_;
 	}
 	return fileSplitSize_;
-}
-
-size_t Application::getRemainingSplitsToBeProcessed() const {
-	return remainingSplitsToBeProcessed_;
 }
 
 int Application::getClientEventType() const {
@@ -235,45 +214,12 @@ int Application::getFileSplitNodeExpectedEventType(int index) const{
 	return -1;	// Empty
 }
 
-int Application::popFileSplitNodeExpectedEventType(){
-	if(!(fileSplitExpectedNodeEvents_.empty())){	// not empty
-		int expectedNodeEventType;
-		expectedNodeEventType = fileSplitExpectedNodeEvents_.back();
-		fileSplitExpectedNodeEvents_.pop_back();
-
-		return expectedNodeEventType;
-	}
-	return -1;	// Empty
-}
-
 size_t Application::getQueueId() const {
 	return queueId_;
 }
 
 void Application::setAmEventType(int amEventType) {
 	amEventType_ = amEventType;
-}
-
-void Application::pushBackAmControlledMappers(const int& mapperLoc) {
-	amControlledMappers_.push_back(mapperLoc);
-}
-
-void Application::pushBackAmControlledReducers(const int& reducerLoc) {
-	amControlledReducers_.push_back(reducerLoc);
-}
-
-int Application::getAmControlledMappers(size_t index) const {
-	if(index < amControlledMappers_.size()){
-		return amControlledMappers_.at(index);
-	}
-	return -1;
-}
-
-int Application::getAmControlledReducers(size_t index) const {
-	if(index < amControlledReducers_.size()){
-		return amControlledReducers_.at(index);
-	}
-	return -1;
 }
 
 int Application::getSeizedMapCpuVcores() const {
@@ -308,39 +254,6 @@ int Application::getSeizedReduceCpuVcores() const {
 
 void Application::setSeizedReduceCpuVcores(int seizedReduceCpuVcores) {
 	seized_reduceCpuVcores_ = seizedReduceCpuVcores;
-}
-
-bool Application::isLastFileSpillReadyForMerge(int fsID) const{
-	// count number of spills of fsID
-	size_t totalSplits=0;
-    for(unsigned int i=0; i < spillInfo_.size();i++){
-    	if ( (spillInfo_.at(i).fsID_ == fsID)){
-    		totalSplits++;
-    	}
-    }
-
-	if(fileSplitExpectedNodeEvents_.size() == (size_t)fsID+1){	// last filesplit
-		if(totalExpectedNumberofSpillsLast_ == totalSplits){
-			return true;
-		}
-		return false;
-	}
-
-	if(totalExpectedNumberofSpills_ == totalSplits){
-		return true;
-	}
-	return false;
-}
-
-size_t Application::getMapperOutputSize(int fsID){
-	// count number of spills of fsID
-	size_t totalSize=0;
-    for(unsigned int i=0; i < spillInfo_.size();i++){
-    	if ( (spillInfo_.at(i).fsID_ == fsID)){
-    		totalSize += (spillInfo_.at(i)).size_;
-    	}
-    }
-    return totalSize;
 }
 
 size_t Application::getTotalNumberOfMappers() const {
@@ -385,7 +298,7 @@ void Application::clearFinishedReducerCompletionWaiters(){
 	    		reducerCompletionWaiters_.begin(),
 	    		reducerCompletionWaiters_.end(),
 	        [](reducerWaiterData element) -> bool {
-				// if mapper output is shuffled to all reducers, remove it from waiting list
+				// if map output is shuffled to all reducers, remove it from waiting list
 				if (element.dataSent){
 					return true;
 				}
@@ -394,12 +307,6 @@ void Application::clearFinishedReducerCompletionWaiters(){
 	    ),
 	    reducerCompletionWaiters_.end()
 	);
-}
-
-reducerWaiterData Application::popReducerCompletionWaiters(){
-	reducerWaiterData temp = reducerCompletionWaiters_.back();
-	reducerCompletionWaiters_.pop_back();
-	return temp;
 }
 
 reducerWaiterData Application::getReducerCompletionWaiter(int index){
@@ -422,7 +329,7 @@ int Application::addReducerLocations(const int& location) {
 }
 
 bool Application::hasAllReducersCreated() const{
-	if((size_t)(mapReduceConfig_.getMapreduceJobReduces()) == reducerLocations_.size()){
+	if((size_t)reduceCount_ == reducerLocations_.size()){
 		return true;
 	}
 	return false;
@@ -460,13 +367,6 @@ size_t Application::gettotalReducerCompletionWaiters() const{
 	return reducerCompletionWaiters_.size();
 }
 
-bool Application::isReducerCompletionWaitersFull() const{
-	if(reducerCompletionWaiters_.size() == (size_t)((mapReduceConfig_.getMapreduceJobReduces())*totalNumberOfMappers_)){
-		return true;
-	}
-	return false;
-}
-
 bool Application::isReducerCompletionWaitersHasElement() const{
 	if(reducerCompletionWaiters_.empty()){
 		return false;
@@ -487,7 +387,6 @@ void Application::notifyDataReception(int nodeId, int redID, int fsID){
 	}
 
 	if(fsID_redID_receivedShufflePacketCount[std::make_pair(fsID,redID)] == fsId_redID_recordId_[std::make_pair(fsID,redID)] ){
-
 		// increment map counter for nodeId
 		if ( reducerNodeID_receivedMapperDataCount_.find(std::make_pair(nodeId,redID)) == reducerNodeID_receivedMapperDataCount_.end() ) {	// not found
 			reducerNodeID_receivedMapperDataCount_[std::make_pair(nodeId,redID)] = 1;
@@ -538,8 +437,7 @@ int Application::getReduceWriteCount(int nodeId, int redID){
 }
 
 void Application::adddataWaitingToBeMerged_(int nodeId, size_t dataWaitingToBeMerged, int redID){
-
-	if ( reducerNodeID_dataWaitingToBeMerged_.find(std::make_pair(nodeId,redID)) == reducerNodeID_dataWaitingToBeMerged_.end() ) {	// not found
+	if (reducerNodeID_dataWaitingToBeMerged_.find(std::make_pair(nodeId,redID)) == reducerNodeID_dataWaitingToBeMerged_.end() ) {	// not found
 		reducerNodeID_dataWaitingToBeMerged_[std::make_pair(nodeId,redID)].chunkSize_.push(dataWaitingToBeMerged);
 		reducerNodeID_dataWaitingToBeMerged_[std::make_pair(nodeId,redID)].numberOfChunksWaitingToBeMerged_ = 1;
 	}
@@ -553,23 +451,11 @@ int Application::getNumberOfWaitingTobeMerged(int nodeId, int redID){
 	return reducerNodeID_dataWaitingToBeMerged_[std::make_pair(nodeId,redID)].numberOfChunksWaitingToBeMerged_;
 }
 
-size_t Application::getTotalChunkSizeWaitingTobeMerged(int nodeId, int redID){
-
-	size_t mergeSize = 0;
-
-	while(!reducerNodeID_dataWaitingToBeMerged_[std::make_pair(nodeId,redID)].chunkSize_.empty()){
-		mergeSize += reducerNodeID_dataWaitingToBeMerged_[std::make_pair(nodeId,redID)].chunkSize_.front();
-		(reducerNodeID_dataWaitingToBeMerged_[std::make_pair(nodeId,redID)].chunkSize_).pop();
-	}
-	return mergeSize;
-}
-
 void Application::reduceNumberOfChunksWaitingToBeMerged(int nodeId, int redID){
 	reducerNodeID_dataWaitingToBeMerged_[std::make_pair(nodeId,redID)].numberOfChunksWaitingToBeMerged_-=mapReduceConfig_.getMapreducetaskIoSortFactor();
 }
 
 size_t Application::popMergeSize(int nodeId, int redID){
-
 	size_t mergeSize = 0;
 
 	for(int i=0;i<mapReduceConfig_.getMapreducetaskIoSortFactor();i++){
@@ -580,7 +466,6 @@ size_t Application::popMergeSize(int nodeId, int redID){
 }
 
 size_t Application::popMergeGivenSize(int nodeId, int redID, int mergeCount){
-
 	size_t mergeSize = 0;
 
 	for(int i=0;i<mergeCount;i++){
@@ -595,7 +480,7 @@ void Application::notifyCompletedReducers(){
 }
 
 bool  Application::checkIfAllReducersComplete() const{
-	if(numberOfCompletedReducers_ == mapReduceConfig_.getMapreduceJobReduces()){
+	if(numberOfCompletedReducers_ == reduceCount_){
 		return true;
 	}
 	return false;
@@ -609,6 +494,10 @@ double Application::getMapStartTime() const {
 	return mapStartTime_;
 }
 
+double Application::getAppStartTime() const {
+	return appStartTime_;
+}
+
 double Application::getReduceFinishTime() const {
 	return reduceFinishTime_;
 }
@@ -619,6 +508,10 @@ double Application::getReduceStartTime() const {
 
 void Application::setMapFinishTime(double mapFinishTime) {
 	mapFinishTime_ = mapFinishTime;
+}
+
+void Application::setAppStartTime(double appStartTime) {
+	appStartTime_ = appStartTime;
 }
 
 void Application::setMapStartTime(double mapStartTime) {
@@ -675,23 +568,6 @@ void Application::addMergeFnStartTime(int index, double mergeFnStartTime){
 	}
 }
 
-void Application::addMergeFnFinishTime(int index, double mergeFnFinTime){
-	// always record...
-	mergeFnFinTime_[index] = mergeFnFinTime;
-}
-
-double Application::getMergeFnTime(int index){
-	return mergeFnFinTime_[index] - mergeFnStartTime_[index];
-}
-
-double Application::getTotalMapMergeTime(int index){
-	return mapMergeTime_[index];
-}
-
-double Application::getShuffleReadTime(int index){
-	return shuffleReadTime_[index] = shuffleReadFinTime_[index] - shuffleReadStartTime_[index];
-}
-
 void Application::setShuffleReadStartTime(int index, double time){
 	shuffleReadStartTime_[index] = time;
 }
@@ -709,15 +585,11 @@ void Application::addReduceFinishTime(int index, double finishTime){
 }
 
 double Application::avgReduceTime() const{
-	return totalReduceFinishTime_/mapReduceConfig_.getMapreduceJobReduces();
+	return totalReduceFinishTime_/reduceCount_;
 }
 
 void Application::addShuffleStartTime(int index, int redID, double shuffleStartTime){
 	shuffleStartTimes_[std::make_pair(index,redID)] = shuffleStartTime;
-}
-
-double  Application::getShuffleExperiStartTime(int index, int redID){
-	return shuffleStartTimes_[std::make_pair(index,redID)];
 }
 
 void Application::addMapFinishTime(int index, double finishTime){
@@ -760,10 +632,10 @@ int Application::subReadyForOnDiskMergeCount_(int redId){
 
 double Application::getTotalShuffleAvgAmongReducers(){
 	double sum=0;
-	for(int i=0;i<mapReduceConfig_.getMapreduceJobReduces();i++){
+	for(int i=0;i<reduceCount_;i++){
 		sum += (shuffleFinishTime_[i] - shuffleStartTime_[i]);
 	}
-	return sum/mapReduceConfig_.getMapreduceJobReduces();
+	return sum/reduceCount_;
 }
 
 bool Application::checkMaxSingleShuffleLimitExceed(size_t resourceSize){
@@ -777,25 +649,21 @@ void Application::setReduceRecordCount(int redId, int count){
 		redId_recordId_[redId] = count;
 }
 
-int Application::getReduceRecordCount(int redId){
-		return redId_recordId_[redId];
-}
-
 bool Application::areAllReduceRecordComplete(int redId){
-	if ( redId_CompletedRecordId_.find(redId) == redId_CompletedRecordId_.end() ) {	// not found
-		redId_CompletedRecordId_[redId] = 1;
+	if (redId_DoneRecID_.find(redId) == redId_DoneRecID_.end()) {	// not found
+		redId_DoneRecID_[redId] = 1;
 	}
 	else{
-		redId_CompletedRecordId_[redId]++;
+		redId_DoneRecID_[redId]++;
 	}
-	if(redId_recordId_[redId] == redId_CompletedRecordId_[redId]){
+	if(redId_recordId_[redId] == redId_DoneRecID_[redId]){
 		return true;
 	}
 	return false;
 }
 
 void Application::setMapRecordCount(int fsID, int count){
-	fsId_recordId_[fsID] = count;
+	fsId_recID_[fsID] = count;
 }
 
 void Application::setShufflePacketCount(int fsID, int redID, int count){
@@ -803,49 +671,15 @@ void Application::setShufflePacketCount(int fsID, int redID, int count){
 }
 
 int Application::getMapRecordCount(int fsID){
-		return fsId_recordId_[fsID];
+	return fsId_recID_[fsID];
 }
 
 void Application::setMapMergeRecordCount(int fsID, int count){
 	fsId_mapMergeRecordId_[fsID] = count;
 }
 
-int Application::getMapMergeRecordCount(int fsID){
-		return fsId_mapMergeRecordId_[fsID];
-}
-
-int Application::getShufflePacketCount(int fsID, int redID){
-		return fsId_redID_recordId_[std::make_pair(fsID,redID)];
-}
-
-bool Application::areAllMapRecordComplete(int fsId){
-	if ( fsId_CompletedRecordId_.find(fsId) == fsId_CompletedRecordId_.end() ) {	// not found
-		fsId_CompletedRecordId_[fsId] = 1;
-	}
-	else{
-		fsId_CompletedRecordId_[fsId]++;
-	}
-	if(fsId_CompletedRecordId_[fsId] == fsId_recordId_[fsId]){
-		return true;
-	}
-	return false;
-}
-
-bool Application::areAllShufflePacketComplete(int fsId, int redID){
-	if ( fsId_redID_CompletedPacketId_.find(std::make_pair(fsId,redID)) == fsId_redID_CompletedPacketId_.end() ) {	// not found
-		fsId_redID_CompletedPacketId_[std::make_pair(fsId,redID)] = 1;
-	}
-	else{
-		fsId_redID_CompletedPacketId_[std::make_pair(fsId,redID)]++;
-	}
-	if(fsId_redID_CompletedPacketId_[std::make_pair(fsId,redID)] == fsId_redID_recordId_[std::make_pair(fsId,redID)]){
-		return true;
-	}
-	return false;
-}
-
 void Application::addMapMergeReadySize(int fsId, size_t size){
-	if ( fsId_mapMergeReadysize_.find(fsId) == fsId_mapMergeReadysize_.end() ) {	// not found
+	if (fsId_mapMergeReadysize_.find(fsId) == fsId_mapMergeReadysize_.end()) {	// not found
 		fsId_mapMergeReadysize_[fsId] = size;
 	}
 	else{
@@ -902,7 +736,6 @@ void Application::decrementmapTransferInfoNumberOfMapRecords(int fsId, int decre
 }
 
 void Application::setRecordInfo(int id, size_t eachRecordSize, size_t lastRecordSize, bool lastRecordExist, int remainingRecordCount, bool isMapRecord){
-
 	if(isMapRecord){
 		fsID_recordInfo_[id].eachRecordSize_ = eachRecordSize;
 		fsID_recordInfo_[id].lastRecordSize_ = lastRecordSize;
@@ -917,12 +750,8 @@ void Application::setRecordInfo(int id, size_t eachRecordSize, size_t lastRecord
 	}
 }
 
-void Application::decrementRecordInfoRemainingMapRecordCount(int fsId){
-	fsID_recordInfo_[fsId].remainingRecordCount_--;
-}
-
-void Application::decrementRecordInfoRemainingMapRecordCountAmount(int fsId, int amount){
-	fsID_recordInfo_[fsId].remainingRecordCount_-=amount;
+void Application::decRecordInfoRemainingMapRecordCount(int fsId, int count){
+	fsID_recordInfo_[fsId].remainingRecordCount_-=count;
 }
 
 recordInfo Application::getReduceRecordInfo(int redId){
@@ -944,7 +773,7 @@ bool Application::notifyMapMergeComplete(int fsId){
 	else{
 		fsId_completedMergeCount_[fsId]++;
 	}
-	if(fsId_completedMergeCount_[fsId] == mapReduceConfig_.getMapreduceJobReduces()){
+	if(fsId_completedMergeCount_[fsId] == reduceCount_){
 		return true;
 	}
 	return false;
@@ -985,7 +814,7 @@ void Application::setShuffledTotalDataForFsidRedid(int fsID, int redID, double d
 }
 
 int Application::incBufferCompletedPacketCount(int fsId){
-	if(  bufferCompletedPacketCount_.find(fsId) == bufferCompletedPacketCount_.end()  ){	// if does not exist create it...
+	if(  bufferCompletedPacketCount_.find(fsId) == bufferCompletedPacketCount_.end()  ){	// create if it does not exist.
 		bufferCompletedPacketCount_[fsId]=0;
 	}
 	return ++bufferCompletedPacketCount_[fsId];
@@ -996,22 +825,21 @@ void Application::resetBufferCompletedPacketCount(int fsId){
 }
 
 int Application::incMergeBufferCompletedPacketCount(int fsID, int redID){
-
-	if(  bufferMergeCompletedPacketCount_.find(std::make_pair(fsID,redID)) == bufferMergeCompletedPacketCount_.end()  ){	// if does not exist create it...
-		bufferMergeCompletedPacketCount_[std::make_pair(fsID,redID)]=0;
+	if(bufferMergeDonePcktCount_.find(std::make_pair(fsID,redID)) == bufferMergeDonePcktCount_.end()){	// create if it does not exist.
+		bufferMergeDonePcktCount_[std::make_pair(fsID,redID)]=0;
 	}
-	return ++bufferMergeCompletedPacketCount_[std::make_pair(fsID,redID)];
+	return ++bufferMergeDonePcktCount_[std::make_pair(fsID,redID)];
 }
 
 int Application::incShuffleWriteDataCount(size_t id){
-	if(bufferShuffleWriteDataCount_.find(id) == bufferShuffleWriteDataCount_.end()){	// if does not exist create it...
+	if(bufferShuffleWriteDataCount_.find(id) == bufferShuffleWriteDataCount_.end()){	// create if it does not exist.
 		bufferShuffleWriteDataCount_[id]=0;
 	}
 	return ++bufferShuffleWriteDataCount_[id];
 }
 
 void Application::resetMergeBufferCompletedPacketCount(int fsID, int redID){
-	bufferMergeCompletedPacketCount_[std::make_pair(fsID,redID)] = 0;
+	bufferMergeDonePcktCount_[std::make_pair(fsID,redID)] = 0;
 }
 
 void Application::resethuffleWriteDataCount(size_t id){
@@ -1051,20 +879,8 @@ void Application::setShuffleWriteDataProperties(size_t id, int numberOfPackets, 
 	reduceWriteid_datasize[id].totalSplitSize_ = totalSplitSize;
 }
 
-int Application::getShuffleWriteDataProperties_NumPackets(size_t id){
-	return reduceWriteid_datasize[id].numPackets_;
-}
-
 double Application::getShuffleWriteDataProperties_DataSize(size_t id){
 	return reduceWriteid_datasize[id].totalSplitSize_;
-}
-
-bool Application::getShuffleWriteDataProperties_lastRecordExist(size_t id){
-	return reduceWriteid_datasize[id].lastRecordExist_;
-}
-
-double Application::getShuffleWriteDataProperties_lastRecordSize(size_t id){
-	return reduceWriteid_datasize[id].lastRecordSize_;
 }
 
 void Application::setShuffleReadInfo(int fsID, int redID, int remainingNumberOfMapRecords, bool lastRecordExist, size_t lastRecordSize){
@@ -1074,18 +890,18 @@ void Application::setShuffleReadInfo(int fsID, int redID, int remainingNumberOfM
 }
 
 int Application::incShuffleReadBufferCompletedPacketCount(int fsID, int redID){
-	if(  bufferShuffleReadCompletedPacketCount_.find(std::make_pair(fsID,redID)) == bufferShuffleReadCompletedPacketCount_.end()  ){	// if does not exist create it...
-		bufferShuffleReadCompletedPacketCount_[std::make_pair(fsID,redID)]=0;
+	if(  bufferShuffleReadDonePcktCount_.find(std::make_pair(fsID,redID)) == bufferShuffleReadDonePcktCount_.end()  ){	// if does not exist create it...
+		bufferShuffleReadDonePcktCount_[std::make_pair(fsID,redID)]=0;
 	}
 
-	return ++bufferShuffleReadCompletedPacketCount_[std::make_pair(fsID,redID)];
+	return ++bufferShuffleReadDonePcktCount_[std::make_pair(fsID,redID)];
 }
 
 int Application::getShuffleReadInfo_remainingNumberOfMapRecords(int fsID, int redID){
 	return fsID_shuffleReadInfo_[std::make_pair(fsID,redID)].remainingNumberOfMapRecords_;
 }
 
-int Application::decrementShuffleReadNumberOfRecords(int fsID, int redID, int decrementAmount){
+int Application::decShuffleReadNumberOfRecords(int fsID, int redID, int decrementAmount){
 	return fsID_shuffleReadInfo_[std::make_pair(fsID,redID)].remainingNumberOfMapRecords_-=decrementAmount;
 }
 
@@ -1098,13 +914,53 @@ size_t Application::getShuffleReadInfo_lastRecordSize(int fsID, int redID){
 }
 
 void Application::resetShuffleReadBufferCompletedPacketCount(int fsID, int redID){
-	bufferShuffleReadCompletedPacketCount_[std::make_pair(fsID,redID)] = 0;
+	bufferShuffleReadDonePcktCount_[std::make_pair(fsID,redID)] = 0;
 }
 
 size_t Application::getRecordSize() const {
 	return recordSize_;
 }
 
-double Application::getMapSortIntensity() const {
-	return mapSortIntensity_;
+void Application::setFileSplitSize(size_t fileSplitSize) {
+	fileSplitSize_ = fileSplitSize;
+	lastFileSplitSize_ = fileSplitSize_;
+	remainingSplitsToBeProcessed_ = ((applicationSize_ - lastFileSplitSize_)/ fileSplitSize_) + 1;
+
+	// how many spills will be created
+	size_t mapreduceTaskIOSortMb = mapReduceConfig_.getMapreduceTaskIoSortMb();
+
+	if(fileSplitSize_ % (mapreduceTaskIOSortMb << 20) == 0){
+		totalExpectedNumberofSpills_ = fileSplitSize_ / (mapreduceTaskIOSortMb << 20);
+	}
+	else{
+		totalExpectedNumberofSpills_ = (fileSplitSize_ / (mapreduceTaskIOSortMb << 20)) +1;
+	}
+	totalExpectedNumberofSpillsLast_ = totalExpectedNumberofSpills_;
+}
+
+void Application::setQueueId(size_t queueId) {
+	queueId_ = queueId;
+	// for each queue, set the queueID_checkPendingApp value
+	queueID_checkPendingApp[queueId] = true;
+
+	if (queueID_checkPendingAppCount.find(queueId) == queueID_checkPendingAppCount.end()){	// not found
+		queueID_checkPendingAppCount[queueId] = 1;
+		currentlyRunningAppCount[queueId] = 0;
+	}
+	else{
+		queueID_checkPendingAppCount[queueId] += 1;
+	}
+}
+
+int Application::getReduceCount() const {
+	return reduceCount_;
+}
+
+void Application::setReduceCount(int reduceCount) {
+	reduceCount_ = reduceCount;
+
+	for(int i=0;i<reduceCount_;i++){
+		shuffleStartTime_[i]=-1;
+		shuffleFinishTime_[i]=-1;
+	}
 }

@@ -26,13 +26,10 @@
 #ifndef MEMORY_H_
 #define MEMORY_H_
 
-#include <queue>
 #include <memory>
 #include <map>
 #include "EventTimeCompare.h"
 #define EXP_MEM_DELAY_CONSTANT 3			// this is the delay constant, increase to lower the exponential delay (if selected delay type is exponential)
-
-extern std::priority_queue<Event, std::vector<Event>, EventTimeCompare > eventsList;
 
 class Memory{
 public:
@@ -44,13 +41,11 @@ public:
 
 	size_t getRemainingCapacity() const;
 
-	bool addCheckMergeSpill(double dataSize, size_t shuffleMergeLimit, int redID);
+	bool addCheckMergeSpill(double dataSize, size_t shuffleMergeLimit, int redID, int appID);
 
-	double getResetDataWaitingForSpill(int redID);
+	double getResetDataWaitingForSpill(int redID, int appID);
 
-	void resetDataWaitingForSpill(int redID);
-
-	int getnumberOfMapOutputsWaitingForSpill(int redID);
+	int getnumberOfMapOutputsWaitingForSpill(int redID, int appID);
 
 private:
 	size_t remainingCapacity_;			// total amount of physical memory that can be used
@@ -58,8 +53,8 @@ private:
 	enum DistributionType delayType_;
 	enum TimeType unit_;
 	double delayratio_;
-	std::map<int,double> dataWaitingForSpill_;
-	std::map<int,int> numberOfMapOutputsWaitingForSpill_;	// redID vs numMapOutputs waiting for spill
+	std::map<std::pair<int,int>,double> dataWaitingForSpill_;
+	std::map<std::pair<int,int>,int> numberOfMapOutputsWaitingForSpill_;	// redID vs numMapOutputs waiting for spill
 	std::queue<Event> waitingQueue_;	// events wait in this FIFO queue in case of insufficient resources
 	void delay (Event, double, int);
 };

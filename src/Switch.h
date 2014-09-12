@@ -29,11 +29,9 @@
 #include "Module.h"
 #include "Application.h"
 
-extern std::priority_queue<Event, std::vector<Event>, EventTimeCompare > eventsList;
 extern std::vector<std::shared_ptr<Application>> applications;
-
+extern std::priority_queue<Event, std::vector<Event>, EventTimeCompare > eventsList;
 extern std::map<int, int> nodeExpEventT_switchExpEventT, nodeExpEventT_linkExpEventT;
-
 
 class Switch: public Module {
 public:

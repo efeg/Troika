@@ -421,7 +421,6 @@ reducer.*:\t\t\t\t\tnumber of reduce tasks\n\
         for intensity in self._intensities:
             print intensity
 
-# Use a first order RSM (y = Bo + B1X1 + B2X2 + ... + BnXn, where n = number of res)
 
 start_time = time.time()
 

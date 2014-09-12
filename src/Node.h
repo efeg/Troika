@@ -33,10 +33,8 @@
 #include "Scheduler.h"
 
 #define YARN_HEAPSIZE 1000	// (default) 1000 MB heapsize is allocated for each daemon (datanode and nodemanager) Note: no history server!
+
 extern Scheduler g_scheduler;
-
-extern std::priority_queue<Event, std::vector<Event>, EventTimeCompare > eventsList;
-
 extern bool terminal_output_disabled;
 
 class Node: public Module {
@@ -64,8 +62,9 @@ private:
 	Memory memory_;
 	int outputEventType_;    // the event that will be produced by this module
 	void delay (Event ev);
-	std::map<int, char> activeMappersInThisNode_;
+	std::map<std::pair<int,int>, char> activeMappersInThisNode_;
 	void testing(int numReduces, double eventTime, double avgMapTime, double avgRedTime, double shuffleTime, double mapTime);
+	void recordSetter (size_t partSize, size_t recordSize, int taskID, bool isMapTask, Event* ev);
 };
 
 #endif /* NODE_H_ */

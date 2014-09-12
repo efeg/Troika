@@ -46,12 +46,10 @@ std::map<int, int> linkExpEventT_capacity;				// a mapping for expected event ty
 Link::Link(double capacity, int expectedEventType, int masterEventType, int workerEventType, double mttr,
 		int mtbf, enum DistributionType delayType, enum TimeType unit, double delayratio)
 		: Module(expectedEventType, LINK),
-		totalCapacity_(capacity), delayType_(delayType),
-		unit_(unit), masterEventType_(masterEventType),
-		workerEventType_(workerEventType), mttr_(mttr),
-		mtbf_(mtbf), delayratio_(delayratio),
-		totalPacketProcessed_(0), totalSizeInWaitingBand0Queue_(0.0),
-		totalSizeInWaitingBand1Queue_(0.0), activeTransfer_(false){
+		totalCapacity_(capacity), delayType_(delayType), unit_(unit), masterEventType_(masterEventType),
+		workerEventType_(workerEventType), mttr_(mttr), mtbf_(mtbf), delayratio_(delayratio),
+		totalPacketProcessed_(0), totalSizeInWaitingBand0Queue_(0.0), totalSizeInWaitingBand1Queue_(0.0),
+		activeTransfer_(false){
 	linkExpEventT_capacity[expectedEventType] = totalCapacity_;
 }
 
@@ -66,7 +64,7 @@ Link::~Link() {
 double Link::calculateTransferSpeed(Event* ev){
 	if(activeTransfer_){
 		// enqueue event (when a resource is released queue will be checked)
-		Event newEvent(ev->getApplicationId(), ev->getEventTime(), ev->getNeededResQuantity(), 0, ev->getNextEventType(), ev->getDestinationEventType(),
+		Event newEvent(ev->getAppID(), ev->getEventTime(), ev->getNeededResQuantity(), 0, ev->getNextEventType(), ev->getDestEventType(),
 				ev->getEventBehavior(), ev->getEntityIns().getEntityType(), ev->getLinkBehavior(), ev->getEntityIns().getAttribute(), ev->getFsLoc(),
 				ev->getFsId(), ev->getRedId(), ev->getRecordId());
 
@@ -123,9 +121,6 @@ void Link::activateWaitingEventInQueue(double currentTime){
 
 void Link::work (Event* ev){
 	if(ev->getLinkBehavior() == SEIZETOMASTER || ev->getLinkBehavior() == SEIZEFROMMASTER){
-		#ifndef TERMINAL_LOG_DISABLED
-		std::cout << "SEIZETOMASTER: fsID " << ev->getFsId() << " fsloc " << ev->getFsLoc()<< " from: " << workerEventType_ << " going to: "<< ev->getDestinationEventType() << std::endl;
-		#endif
 		/* If the returned value is 0, this means that currently
 		 * there is an active transfer so the request is queued
 		 * wait for the link to release the seized resource.*/
@@ -135,30 +130,21 @@ void Link::work (Event* ev){
 		}
 	}
 	else if(ev->getLinkBehavior() == RELEASETOMASTER){
-		#ifndef TERMINAL_LOG_DISABLED
-		std::cout << "RELEASETOMASTER seized: " << ev->getSeizedResQuantity()<< " fsid " << ev->getFsId() << " fsloc " << ev->getFsLoc()<< std::endl;
-		#endif
-
 		// The link is released for completion of transfer
 		activeTransfer_ = false;
 		// generate POST-LINK EVENT, enqueue to eventsList
-		Event newEvent(ev->getApplicationId(), ev->getEventTime(), ev->getNeededResQuantity(), 0.0, masterEventType_, ev->getDestinationEventType(),
+		Event newEvent(ev->getAppID(), ev->getEventTime(), ev->getNeededResQuantity(), 0.0, masterEventType_, ev->getDestEventType(),
 				   ev->getEventBehavior(), ev->getEntityIns().getEntityType(), SEIZETOMASTER, ev->getEntityIns().getAttribute(), ev->getFsLoc(), ev->getFsId(), ev->getRedId(), ev->getRecordId());
 		eventsList.push(newEvent);
 
 		// activate if there is any waiting event in either band0 or band1
 		activateWaitingEventInQueue(ev->getEventTime());
-
 	}
 	else if(ev->getLinkBehavior() == RELEASEFROMMASTER){
-		#ifndef TERMINAL_LOG_DISABLED
-		std::cout << "RELEASEFROMMASTER seized: " << ev->getSeizedResQuantity()<< " fsid " << ev->getFsId() << " fsloc " << ev->getFsLoc()<< std::endl;
-		#endif
-
 		// The link is released for completion of transfer
 		activeTransfer_ = false;
 		// generate POST-LINK EVENT, enqueue to eventsList
-		Event newEvent(ev->getApplicationId(), ev->getEventTime(), ev->getNeededResQuantity(), 0.0, workerEventType_, ev->getDestinationEventType(),
+		Event newEvent(ev->getAppID(), ev->getEventTime(), ev->getNeededResQuantity(), 0.0, workerEventType_, ev->getDestEventType(),
 				   ev->getEventBehavior(), ev->getEntityIns().getEntityType(), SEIZEFROMMASTER, ev->getEntityIns().getAttribute(), ev->getFsLoc(), ev->getFsId(), ev->getRedId(), ev->getRecordId());
 		eventsList.push(newEvent);
 
@@ -180,11 +166,7 @@ void Link::delay (Event ev, double currentTime, int transferSpeed){
 	double additionalDelay = baseTransferTime * delayratio_;
 
 	switch (delayType_){
-
 		case UNIFORM:{
-			#ifndef TERMINAL_LOG_DISABLED
-			std::cout << "in UNIFORM" << std::endl;
-			#endif
 
 			// Adjust time units to be stored as seconds in simulation time
 			if (unit_ == MINUTES){
@@ -199,7 +181,7 @@ void Link::delay (Event ev, double currentTime, int transferSpeed){
 			newEventTime += distribution(generator);
 
 			// generate RELEASE event, enqueue to eventsList
-			Event newEvent(ev.getApplicationId(), newEventTime, ev.getNeededResQuantity(), ev.getSeizedResQuantity(), ev.getNextEventType(), ev.getDestinationEventType(),
+			Event newEvent(ev.getAppID(), newEventTime, ev.getNeededResQuantity(), ev.getSeizedResQuantity(), ev.getNextEventType(), ev.getDestEventType(),
 					ev.getEventBehavior(), ev.getEntityIns().getEntityType(), getReleaseBehavior(ev.getLinkBehavior()), ev.getEntityIns().getAttribute(), ev.getFsLoc(),
 					ev.getFsId(), ev.getRedId(), ev.getRecordId());
 
@@ -208,9 +190,6 @@ void Link::delay (Event ev, double currentTime, int transferSpeed){
 			break;}
 		case EXPONENTIAL:{
 
-			#ifndef TERMINAL_LOG_DISABLED
-						std::cout << "in EXPONENTIAL" << std::endl;
-			#endif
 			std::exponential_distribution<double> exponential(EXP_NW_DELAY_CONSTANT/additionalDelay);
 
 			if (unit_ == MINUTES){
@@ -223,7 +202,7 @@ void Link::delay (Event ev, double currentTime, int transferSpeed){
 				newEventTime += exponential(generator);
 			}
 			// generate RELEASE event, enqueue to eventsList
-			Event newEvent(ev.getApplicationId(), newEventTime, ev.getNeededResQuantity(), ev.getSeizedResQuantity(), ev.getNextEventType(), ev.getDestinationEventType(),
+			Event newEvent(ev.getAppID(), newEventTime, ev.getNeededResQuantity(), ev.getSeizedResQuantity(), ev.getNextEventType(), ev.getDestEventType(),
 					ev.getEventBehavior(), ev.getEntityIns().getEntityType(), getReleaseBehavior(ev.getLinkBehavior()), ev.getEntityIns().getAttribute(), ev.getFsLoc(),
 					ev.getFsId(), ev.getRedId(), ev.getRecordId());
 
@@ -232,9 +211,6 @@ void Link::delay (Event ev, double currentTime, int transferSpeed){
 			break;}
 		case CONSTANT:{
 
-			#ifndef TERMINAL_LOG_DISABLED
-			std::cout << "in CONSTANT" << std::endl;
-			#endif
 			if (unit_ == MINUTES){
 				newEventTime += MINUTE_IN_SEC*additionalDelay;
 			}
@@ -246,7 +222,7 @@ void Link::delay (Event ev, double currentTime, int transferSpeed){
 			}
 
 			// generate RELEASE event, enqueue to eventsList
-			Event newEvent(ev.getApplicationId(), newEventTime, ev.getNeededResQuantity(), ev.getSeizedResQuantity(), ev.getNextEventType(), ev.getDestinationEventType(),
+			Event newEvent(ev.getAppID(), newEventTime, ev.getNeededResQuantity(), ev.getSeizedResQuantity(), ev.getNextEventType(), ev.getDestEventType(),
 					ev.getEventBehavior(), ev.getEntityIns().getEntityType(), getReleaseBehavior(ev.getLinkBehavior()), ev.getEntityIns().getAttribute(), ev.getFsLoc(),
 					ev.getFsId(), ev.getRedId(), ev.getRecordId());
 
@@ -269,7 +245,6 @@ double Link::getTotalCapacity() const {
 }
 
 enum LinkEventBehavior Link::getReleaseBehavior(enum LinkEventBehavior behavior){
-
 	if(behavior == SEIZETOMASTER){
 		return RELEASETOMASTER;
 	}

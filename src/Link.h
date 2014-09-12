@@ -26,7 +26,6 @@
 #ifndef LINK_H_
 #define LINK_H_
 
-#include <queue>
 #include <memory>
 #include "Module.h"
 #include "EventTimeCompare.h"
@@ -36,7 +35,7 @@
 extern std::priority_queue<Event, std::vector<Event>, EventTimeCompare > eventsList;
 
 // Link module is a specialized module for connection between machines
-class Link: public Module {
+class Link: public Module{
 public:
 
 	Link(double, int, int, int, double mttr=0, int mtbf=0,

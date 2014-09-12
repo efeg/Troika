@@ -30,10 +30,10 @@
 #define TERMINAL_LOG_DISABLED
 
 #define HOUR_IN_SEC 3600
+#define SECOND_IN_MS 1000
 #define MINUTE_IN_SEC 60
-#define HEARTBEAT_SIZE 1000												// Default heartbeat size in bytes
-
-#define YARN_NODEMANAGER_HEARTBEAT_INTERVALMS 1000							// Heartbeat interval to RM
+#define HEARTBEAT_SIZE 1000						// Default heartbeat size in bytes
+#define YARN_NODEMANAGER_HEARTBEAT_INTERVALMS 1000	// Heartbeat interval to RM
 
 enum ModuleType{
 	NODE=1,
@@ -73,24 +73,11 @@ enum TimeType{
 	HOURS=3
 };
 
-enum RecordType{
-	COUNT=1,
-	TIME_BETWEEN=2,
-	TIME_INTERVAL=3
-};
-
 enum EntityType{
 	APPLICATION=1,
 	MAPTASK=2,
 	REDUCETASK=3,
 	OTHER=4
-};
-
-enum AttributeType{
-	UNIF=1,
-	EXPO=2,
-	CONS=3,
-	TNOW=4
 };
 
 #endif /* DATATYPES_H_ */

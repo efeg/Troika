@@ -26,19 +26,14 @@
 #ifndef HARDDISK_H_
 #define HARDDISK_H_
 
-#include <queue>
 #include <memory>
 #include <map>
 #include <chrono>
 #include "EventTimeCompare.h"
-#define EXP_HD_DELAY_CONSTANT 3			// this is the delay constant, increase to lower the exponential delay (if selected delay type is exponential)
+#define EXP_HD_DELAY_CONSTANT 3	// this is the delay constant, increase to lower the exponential delay (if selected delay type is exponential)
+#define CFQ_HD_SCHEDULER			// Linux CFQ scheduler
 
 extern std::priority_queue<Event, std::vector<Event>, EventTimeCompare > eventsList;
-
-// #define TWO_QUEUE_HD_SCHEDULER		// two separate queues for reduce spills and all other requests
-#define CFQ_HD_SCHEDULER				// Linux CFQ scheduler
-// #define FIFO_HD_SCHEDULER				// FIFO HD scheduler (noop)
-
 
 #ifdef CFQ_HD_SCHEDULER
 

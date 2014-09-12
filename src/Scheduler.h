@@ -36,11 +36,12 @@
 #define YARN_SCHEDULER_MIN_ALLOCATION_VCORES 1								// default min. allocation for every container request at the RM, in terms of virtual CPU cores. Requests lower than this won't take effect, and the specified value will get allocated the minimum.
 #define YARN_SCHEDULER_MAX_ALLOCATION_VCORES 32 							// default max. allocation for every container request at the RM, in terms of virtual CPU cores. Requests higher than this won't take effect, and will get capped to this value.
 #define YARN_SCHEDULER_CAPACITY_MAX_AM_RESOURCE_PERCENT 0.1				// default max. percent of resources in the cluster which can be used to run application masters (for each capacity queue)
-
 #define DEFAULT_RESOURCE_CALCULATOR false									// yarn.scheduler.capacity.resource-calculator (false: only memory true: memory and cpu)
 
 #ifndef SCHEDULER_H_
 #define SCHEDULER_H_
+
+extern std::priority_queue<Event, std::vector<Event>, EventTimeCompare > eventsList;
 
 struct waitingTaskInfo{
 	size_t appId;
@@ -56,10 +57,15 @@ struct remainingCapacities{
 	size_t remainingMemoryCapacity;
 };
 
+struct amScheduleData{
+size_t appId_;
+int outputEventType_;
+};
+
 extern std::map<int, remainingCapacities> nodeExpEventT_remainingCap;	// up-to-date remaining capacities
 extern std::map<int, int> nodeExpEventT_switchExpEventT;				// a mapping for expected event types of node and rack to be used for network simulation
 extern std::vector<std::shared_ptr<Application>> applications;
-extern std::map<int, enum NodeType> nodeExpEventT_nodeType;		// used to check if is it a RM node
+extern std::map<int, enum NodeType> nodeExpEventT_nodeType;			// used to check if is it a RM node
 
 class Scheduler{
 public:
@@ -85,7 +91,7 @@ public:
 
 	double getQueueCapacity(size_t queueIndex) const;
 
-	int schedulerSubmitNewApp(size_t appId);
+	int schedulerSubmitNewApp(size_t appId, int outputEventType);
 
 	struct waitingTaskInfo schedulerGetMapperLocation(size_t appId, int fileSplitLocationExpectedEventType, bool wakeUpSignal, int outEvent=-1, int attr=-1, int fsid=-1);
 
@@ -93,7 +99,7 @@ public:
 
 	void updateQueueRemainingCapacities(int expectedEventType, int remainingCpuCapacity, size_t remainingMemoryCapacity, bool isRM, size_t nodemanagerResManMB);
 
-	void schedulerReleaseAMresources(int appID);
+	void schedulerReleaseAMresources(int appID, double outEventTime);
 
 	struct waitingTaskInfo schedulerReleaseReducerresources(int appID, int nodeEventType);
 
@@ -111,6 +117,8 @@ public:
 
 	int getnodeId_maxNumberOfMapTaskPerNode(int nodeID);
 
+	size_t getMaxNumberOfAppsAtQueue(size_t queueIndex);
+
 private:
 	std::vector<double> queueCapacities_;			// queueId from Application will match with the order the elements are pushed to vector
 	double maxAmResourcePercent_;
@@ -119,12 +127,15 @@ private:
 	bool resourceCalculator_, maxAlreadySet_;
 	bool isReleasedAlready(int appID, int fsID);
 	// queueId from Application will match with the order the elements are pushed to vector
-	std::vector<double> queueRemainingCoreCapacities_, queueRemainingMemoryCapacities_;
+	std::vector<double> queueRemainingCoreCapacities_, queueRemainingMemoryCapacities_;		// queue resources per CLUSTER
 	std::vector<int> workerNodeExpectedEventTypes_;			// used to determine which nodes are workers
 	std::vector<size_t> remainingMemResource_AM_, remainingMemResource_Container_, remainingCpuResource_AM_, remainingCpuResource_Container_;
-	std::queue<waitingTaskInfo> waitingMapperQueue_, waitingReducerQueue_;
+	std::map<int, std::queue<waitingTaskInfo>> waitingMapperQueue_, waitingReducerQueue_;
 	std::map<int, int> nodeId_maxNumberOfMapTaskPerNode;
-	void incnodeId_maxNumberOfMapTaskPerNode(int fsloc);
+	std::map<int, std::queue<amScheduleData>> containerPendingAppQueue_; // an app that can run concurrently in a queue but has no resource for am is enqueued here.
+
+	void incnodeId_maxNumberOfMapTaskPerNode(int fsloc, int appID);
+	void setWaitingTaskInfo(waitingTaskInfo &info, size_t appID, int taskLocation, int attr, int fsID, int outEvent, bool taskType);
 };
 
 #endif /* SCHEDULER_H_ */

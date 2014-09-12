@@ -28,7 +28,7 @@ from threading import Lock, Semaphore
 import re, os, time, sys
 import argparse
 import collections
-from numpy import asmatrix, ones, matrix, array
+from numpy import asmatrix, ones, matrix, array, linalg
 import time
 
 # python recommendationEngine.py greedyBundleOptimizer.txt -b 50000 -l 1
@@ -64,9 +64,9 @@ nets.*:\t\t\t\t\t\tnetwork speed in bytes/s\n\
 maxr.*:\t\t\t\t\t\tmaximum HD read speed\n\
 maxw.*:\t\t\t\t\t\tmaximum HD write speed\n\
 minr.*:\t\t\t\t\t\tminimum HD read speed\n\
-minw.*:\t\t\t\t\t\tminimum HD write spedd\n\
+minw.*:\t\t\t\t\t\tminimum HD write speed\n\
 me.*:\t\t\t\t\t\tmemory size\n\
-app.*:\t\t\t\t\t\tapplication size\n\
+app.*:\t\t\t\t\t\tapplication input size\n\
 mapo.*:\t\t\t\t\t\tmap output percent\n\
 reduceOutputPercent.*:\t\t\t\treduce output percent\n\
 fin.*:\t\t\t\t\t\tfinal output percent\n\
@@ -91,6 +91,8 @@ mapSortIntensity.*:\t\t\t\tmapSortIntensity\n\
 reduceIntensity.*:\t\t\t\treduceIntensity\n\
 reduceSortIntensity.*:\t\t\t\treduceSortIntensity\n\
 combinerIntensity.*:\t\t\t\tcombinerIntensity\n\
+queueIDs.*:\t\t\t\tCapacityScheduler queueIDs for applications\n\
+schQueues.*:\t\t\t\tnumber and corresponding capacity of queues\n\
 ")
 
         # required argument
@@ -142,6 +144,13 @@ combinerIntensity.*:\t\t\t\tcombinerIntensity\n\
         # contains the systems to be tested (the list is populated in "eliminate" fn)
         self._systemsToBeTested = []
         self.sortedSystems = []
+
+        # read file to count apps
+        TROIKAInput = open(self.args.TROIKAInputFileName,"r")
+        self.appCount = 0
+        for line in TROIKAInput:
+            if line[0] == 'a':
+                self.appCount += 1
         
     @property
     def systemsToBeTested(self):
@@ -201,41 +210,71 @@ combinerIntensity.*:\t\t\t\tcombinerIntensity\n\
         totalCost = (numberOfNodes* nodeCost) + (numberOfLinks* linkCost)
         return totalCost
 
+    def isNumber(self, word):
+        try:
+            float(word)
+            return True
+        except ValueError:
+            return False
+
     def setNumberOfLists(self):
         numberOfRes = 0
         lisOfWords = self._systemsToBeTested[0].split()
 
+        queueIDs_schQueues_Flag = False
+        checkNext = False
+
         for word in lisOfWords:
             if word == 'res':
-                numberOfRes += 1
+                checkNext = True
+            elif checkNext:
+                checkNext = False
+                if word == 'queueIDs' or word == 'schQueues':
+                    queueIDs_schQueues_Flag = True
+                else:
+                    numberOfRes += 1
+            elif queueIDs_schQueues_Flag:
+                if self.isNumber(word):
+                    numberOfRes += 1
+                else:
+                    queueIDs_schQueues_Flag = False
 
         self.numberOfLists = numberOfRes
 
     # returns the number of non-range res
     def getNumberOfLists(self):
-        getCounter = -1
         resLocations = []
         lisOfWords = self._systemsToBeTested[0].split()
 
+        queueIDs_schQueues_Flag = False
+        checkNext = False
+        index = 0
+
         for word in lisOfWords:
             if word == 'res':
-                # will be used to get the index of next of next word
-                getCounter = 1
+                checkNext = True
+            elif checkNext:
+                checkNext = False
+                if word == 'queueIDs' or word == 'schQueues':
+                    queueIDs_schQueues_Flag = True
+                else:
+                    resLocations.append(long(index +1))
+            elif queueIDs_schQueues_Flag:
+                if self.isNumber(word):
+                    resLocations.append(long(index))
+                else:
+                    queueIDs_schQueues_Flag = False
 
-            elif getCounter == 0:
-                resLocations.append(long(lisOfWords.index(word)) +1)
-
-            getCounter -= 1
+            index += 1
 
         return resLocations
 
     def createSortedLists(self):
         resLocations = self.getNumberOfLists()
-
         sortedSystems = [[] for i in range(self.numberOfLists)]
 
         for i in xrange(self.numberOfLists):
-            sortedSystems[i].extend(sorted(self._systemsToBeTested, key=lambda mem: mem.split(None, resLocations[i]+1)[resLocations[i]], reverse=True))
+            sortedSystems[i].extend(sorted(self._systemsToBeTested, key=lambda mem: float(mem.split(None, resLocations[i]+1)[resLocations[i]]), reverse=True))
 
         return sortedSystems
 
@@ -294,6 +333,7 @@ combinerIntensity.*:\t\t\t\tcombinerIntensity\n\
         # insufficient number of available bundles, then use multi-dimensional optimization)
         if self.useRSM and (self.numberOfConfigs < self.numberOfLists*self.SAMPLES_PER_PARAM):
             print "Sample size is less than user's request after the pruning. RSM cannot be used. Fallback to multidimensional optimization."
+            print "Number of Alternatives: " + str(self.numberOfConfigs) + " required Samples: " + str(self.numberOfLists*self.SAMPLES_PER_PARAM)
             self.useRSM = False
 
         if not self.useRSM:
@@ -304,12 +344,14 @@ combinerIntensity.*:\t\t\t\tcombinerIntensity\n\
 
     def extractCommand(self, system):
 
-        simId       = system.split(None, 2)[1]
+        simId = system.split(None, 2)[1]
         rangedCommand = []
         regularCommand = ""
         totSimCount = self.DEFAULT_SIMCOUNT
         words = system.split()
 
+        # signal the existence of the commands with the list
+        queueIDs_schQueues_Flag = False
         rangeresCount = -1
         resCount = -1
 
@@ -317,10 +359,16 @@ combinerIntensity.*:\t\t\t\tcombinerIntensity\n\
 
             if word == 'rangeres':
                 rangeresCount = 5
+                queueIDs_schQueues_Flag = False
             elif word == "res":
                 resCount = 2
+                queueIDs_schQueues_Flag = False
             elif word.startswith('repeat'):
                 totSimCount = long(words[words.index(word)+1])
+                queueIDs_schQueues_Flag = False
+
+            elif word.startswith('nodec') or word.startswith('linkc'):
+                resCount = -1
 
             # detect range resource names and values (bottom limit upper limit and step size)
             elif (rangeresCount > 0) and (rangeresCount <= 4):
@@ -401,10 +449,19 @@ combinerIntensity.*:\t\t\t\tcombinerIntensity\n\
                     regularCommand += " --reduceSortIntensity "
                 elif word.startswith('combinerIntensity'):
                     regularCommand += " --combinerIntensity "
+                elif word.startswith('queueIDs'):
+                    regularCommand += " --queueIDs "
+                    queueIDs_schQueues_Flag = True
+                elif word.startswith('schQueues'):
+                    regularCommand += " --schQueues "
+                    queueIDs_schQueues_Flag = True
 
             # detect resource values 
             elif resCount == 0:
                 regularCommand += str(word)
+                if queueIDs_schQueues_Flag:
+                    regularCommand += " "
+                    continue
 
             # decrease resource counters
             rangeresCount -= 1
@@ -465,11 +522,11 @@ combinerIntensity.*:\t\t\t\tcombinerIntensity\n\
                 TotalMap = 0
 
                 for i in xrange(totSimCount):
-                    ElapsedTotal += float(content[0 +5*i])
-                    AvgMap += float(content[1 +5*i])
-                    AvgReduce += float(content[2 +5*i])
-                    AvgShuffle += float(content[3 +5*i])
-                    TotalMap += float(content[4 +5*i])
+                    ElapsedTotal += float(content[0 +5*(self.appCount-1+i)])
+                    AvgMap += float(content[1 +5*(self.appCount-1+i)])
+                    AvgReduce += float(content[2 +5*(self.appCount-1+i)])
+                    AvgShuffle += float(content[3 +5*(self.appCount-1+i)])
+                    TotalMap += float(content[4 +5*(self.appCount-1+i)])
 
                 toBeWritten = str(simId) + " " +str(ElapsedTotal/totSimCount) + " " + str(AvgMap/totSimCount) + " " + str(AvgReduce/totSimCount) + " " + str(AvgShuffle/totSimCount) + " " + str(TotalMap/totSimCount) + "\n"
 
@@ -495,7 +552,7 @@ combinerIntensity.*:\t\t\t\tcombinerIntensity\n\
             self.resultCache[toBeWritten.split(None, 1)[0]] = toBeWritten + " $" + bestCommand
 
             if self.args.loglevel > 1:
-                print "Added to cache " + str(self.resultCache[toBeWritten.split(None, 1)[0]])
+                print "[LOG]: Added to cache " + str(self.resultCache[toBeWritten.split(None, 1)[0]])
         else:
             return False
 
@@ -526,23 +583,42 @@ combinerIntensity.*:\t\t\t\tcombinerIntensity\n\
         for system in self._systemsToBeTested:
             lisOfWords = system.split()
             resIndex = 0
-            getCounter = -1
+            queueIDs_schQueues_Flag = False
+            checkNext = False
+            index = 0
 
             for word in lisOfWords:
                 if word == 'res':
-                    # will be used to get the index of next of next word
-                    getCounter = 2
+                    checkNext = True
+                elif checkNext:
+                    checkNext = False
+                    if word == 'queueIDs' or word == 'schQueues':
+                        queueIDs_schQueues_Flag = True
+                    else:
+                        resMatrix[rowID, colID] = float(lisOfWords[long(index +1)])
+                        colID += 1
 
-                elif getCounter == 0:
-                    resMatrix[rowID, colID] = float(word)
-                    colID += 1
-                    
-                    if maxList[resIndex] < float(word):
-                        maxList[resIndex] = float(word)
-                    if minList[resIndex] > float(word):
-                        minList[resIndex] = float(word)
-                    resIndex += 1
-                getCounter -= 1
+                        if maxList[resIndex] < resMatrix[rowID, colID-1]:
+                            maxList[resIndex] = resMatrix[rowID, colID-1]
+                        if minList[resIndex] > resMatrix[rowID, colID-1]:
+                            minList[resIndex] = resMatrix[rowID, colID-1]
+                        resIndex += 1
+
+                elif queueIDs_schQueues_Flag:
+                    if self.isNumber(word):
+
+                        resMatrix[rowID, colID] = float(lisOfWords[long(index)])
+                        colID += 1
+
+                        if maxList[resIndex] < resMatrix[rowID, colID-1]:
+                            maxList[resIndex] = resMatrix[rowID, colID-1]
+                        if minList[resIndex] > resMatrix[rowID, colID-1]:
+                            minList[resIndex] = resMatrix[rowID, colID-1]
+                        resIndex += 1
+                    else:
+                        queueIDs_schQueues_Flag = False
+
+                index += 1
 
             if rowID == self.numberOfLists*self.SAMPLES_PER_PARAM -1:
                 break
@@ -550,9 +626,10 @@ combinerIntensity.*:\t\t\t\tcombinerIntensity\n\
             rowID += 1
             colID = 0
 
+
         for index in xrange(len(minList)):
             if maxList[index] == minList[index] :
-                print "Parameter value " + str(maxList[index]) + " is the same for the specific parameter"
+                print "[LOG]: Parameter value " + str(maxList[index]) + " is the same for the specific parameter"
                 sys.exit('Make sure that samples contain at least one different value for each parameter!')
 
         return maxList, minList, resMatrix
@@ -561,7 +638,6 @@ combinerIntensity.*:\t\t\t\tcombinerIntensity\n\
     def calculateCodingScheme(self):
 
         maxRes, minRes, resMatrix = self.getMaxMinResList()
-
         # create x matrix
         # number of rows = self.numberOfLists*self.SAMPLES_PER_PARAM
         # number of columns = number of res + 1 = self.numberOfLists + 1
@@ -583,8 +659,8 @@ combinerIntensity.*:\t\t\t\tcombinerIntensity\n\
 
             regularCommand, simId, rangedCommand, totSimCount = self.extractCommand(self._systemsToBeTested[sysID])
             if self.args.loglevel > 1:
-                print "regCommand " + str(regularCommand) + " simID " + str(simId) + " totSimCount " + str(totSimCount)
-                print "Ranged " + str(rangedCommand)
+                print "[LOG]: regCommand " + str(regularCommand) + " simID " + str(simId) + " totSimCount " + str(totSimCount)
+                print "[LOG]: Ranged " + str(rangedCommand)
 
             # perform the test 
             toBeWritten, bestCommand = self.performanceTest(regularCommand, simId, rangedCommand, totSimCount)
@@ -628,17 +704,28 @@ combinerIntensity.*:\t\t\t\tcombinerIntensity\n\
 
         for system in self._systemsToBeTested:
             lisOfWords = system.split()
-            getCounter = -1
+            queueIDs_schQueues_Flag = False
+            checkNext = False
+            index = 0
 
             for word in lisOfWords:
                 if word == 'res':
-                    # will be used to get the index of next of next word
-                    getCounter = 2
+                    checkNext = True
+                elif checkNext:
+                    checkNext = False
+                    if word == 'queueIDs' or word == 'schQueues':
+                        queueIDs_schQueues_Flag = True
+                    else:
+                        sysResMatrix[rowID, colID+1] = float(lisOfWords[long(index +1)])
+                        colID += 1
+                elif queueIDs_schQueues_Flag:
+                    if self.isNumber(word):
+                        sysResMatrix[rowID, colID+1] = float(lisOfWords[long(index)])
+                        colID += 1
+                    else:
+                        queueIDs_schQueues_Flag = False
 
-                elif getCounter == 0:
-                    sysResMatrix[rowID, colID+1] = float(word)
-                    colID += 1
-                getCounter -= 1
+                index += 1
 
             rowID += 1
             colID = 0
@@ -654,66 +741,91 @@ combinerIntensity.*:\t\t\t\tcombinerIntensity\n\
         return [a for (b,a) in sorted(zip(y_head_list,self._systemsToBeTested))]
 
     def tester(self):
+        optimizerIsSelected = False
 
-        if not self.useRSM:
-            for listID in xrange(self.numberOfLists):
+        while not optimizerIsSelected:
+            if not self.useRSM:
 
-                for configID in xrange(self.numberOfConfigs):
-                    if self.args.loglevel > 0:
-                        print("[LOG]: Start simulation for simID: " + str(self.sortedSystems[listID][configID].split(None, 2)[1]))
+                optimizerIsSelected = True
 
-                    regularCommand, simId, rangedCommand, totSimCount = self.extractCommand(self.sortedSystems[listID][configID])
-                    if self.args.loglevel > 1:
-                        print "regCommand " + str(regularCommand) + " simID " + str(simId) + " totSimCount " + str(totSimCount)
-                        print "Ranged " + str(rangedCommand)
+                for listID in xrange(self.numberOfLists):
 
-                    # perform the test 
-                    toBeWritten, bestCommand = self.performanceTest(regularCommand, simId, rangedCommand, totSimCount)
-                    if self.args.loglevel > 0:
-                        print("[LOG]: Finish simulation for simID: " + str(self.sortedSystems[listID][configID].split(None, 2)[1]))
+                    for configID in xrange(self.numberOfConfigs):
+                        if self.args.loglevel > 0:
+                            print("[LOG]: Start simulation for simID: " + str(self.sortedSystems[listID][configID].split(None, 2)[1]))
 
-                    # check if the result is better than the previous test
-                    if (not self.isNewPerformanceBetter(toBeWritten, bestCommand)) and self.outofToleranceLimit(toBeWritten):
+                        regularCommand, simId, rangedCommand, totSimCount = self.extractCommand(self.sortedSystems[listID][configID])
+
+                        print "totSimCount " + str(totSimCount)
+
                         if self.args.loglevel > 1:
-                            print "Intolerable..."
-                        break
-        else:
-            # calculate coding scheme to map all the variable values between [-1, 1] and generate X_matrix
-            maxRes, minRes, X_matrix = self.calculateCodingScheme()
-            # generate y matrix
-            y_matrix = self.generateYmatrix()
-            # calculate X'X
-            Xprime_X = self.getXprime_X(X_matrix)
-            # calculate X'y
-            Xprime_y = self.getXprime_y(X_matrix, y_matrix)
-            # calculate b
-            b_matrix = self.getb_matrix(Xprime_X, Xprime_y)
-            # calculate decoded b
-            decoded_b_matrix = self.get_decoded_b_matrix(b_matrix, maxRes, minRes)
-            # calculate y_head
-            y_head_matrix = self.get_y_head_matrix(decoded_b_matrix)
-            # convert matrix to a list
-            y_head_list = array(y_head_matrix.T)[0].tolist()
-            # sort systems based on y head
-            sortedSys = self.getSortedSystems(y_head_list)
+                            print "[LOG]: regCommand " + str(regularCommand) + " simID " + str(simId) + " totSimCount " + str(totSimCount)
+                            print "[LOG]: Ranged " + str(rangedCommand)
 
-            for configID in xrange(self.FINAL_TEST_COUNT):
-                if self.args.loglevel > 0:
-                    print("[LOG]: Start simulation for simID: " + str(sortedSys[configID].split(None, 2)[1]))
+                        # perform the test 
+                        toBeWritten, bestCommand = self.performanceTest(regularCommand, simId, rangedCommand, totSimCount)
+                        if self.args.loglevel > 0:
+                            print("[LOG]: Finish simulation for simID: " + str(self.sortedSystems[listID][configID].split(None, 2)[1]))
 
-                regularCommand, simId, rangedCommand, totSimCount = self.extractCommand(sortedSys[configID])
-                if self.args.loglevel > 1:
-                    print "regCommand " + str(regularCommand) + " simID " + str(simId) + " totSimCount " + str(totSimCount)
-                    print "Ranged " + str(rangedCommand)
+                        # check if the result is better than the previous test
+                        if (not self.isNewPerformanceBetter(toBeWritten, bestCommand)) and self.outofToleranceLimit(toBeWritten):
+                            if self.args.loglevel > 1:
+                                print "[LOG]: Intolerable..."
+                            break
+            else:
+                # calculate coding scheme to map all the variable values between [-1, 1] and generate X_matrix
+                maxRes, minRes, X_matrix = self.calculateCodingScheme()
 
-                # perform the test 
-                toBeWritten, bestCommand = self.performanceTest(regularCommand, simId, rangedCommand, totSimCount)
-                
-                if self.args.loglevel > 0:
-                    print("[LOG]: Finish simulation for simID: " + str(sortedSys[configID].split(None, 2)[1]))
-               
-                # update the bestperformance and bestcommand (for those who yield fastest)
-                self.isNewPerformanceBetter(toBeWritten, bestCommand)
+                # calculate X'X
+                Xprime_X = self.getXprime_X(X_matrix)
+
+                # singularity check
+                if linalg.det(Xprime_X) == 0:
+                    self.useRSM = False
+                    # create sorted list for each non-range res
+                    self.sortedSystems = self.createSortedLists()
+                    print "Matrix is singular. RSM cannot be used. Fallback to multidimensional optimization."
+                else:
+                    optimizerIsSelected = True
+
+                    # generate y matrix
+                    y_matrix = self.generateYmatrix()
+
+                    # calculate X'y
+                    Xprime_y = self.getXprime_y(X_matrix, y_matrix)
+
+                    # calculate b
+                    b_matrix = self.getb_matrix(Xprime_X, Xprime_y)
+
+                    # calculate decoded b
+                    decoded_b_matrix = self.get_decoded_b_matrix(b_matrix, maxRes, minRes)
+
+                    # calculate y_head
+                    y_head_matrix = self.get_y_head_matrix(decoded_b_matrix)
+
+                    # convert matrix to a list
+                    y_head_list = array(y_head_matrix.T)[0].tolist()
+
+                    # sort systems based on y head
+                    sortedSys = self.getSortedSystems(y_head_list)
+
+                    for configID in xrange(self.FINAL_TEST_COUNT):
+                        if self.args.loglevel > 0:
+                            print("[LOG]: Start simulation for simID: " + str(sortedSys[configID].split(None, 2)[1]))
+
+                        regularCommand, simId, rangedCommand, totSimCount = self.extractCommand(sortedSys[configID])
+                        if self.args.loglevel > 1:
+                            print "[LOG]: regCommand " + str(regularCommand) + " simID " + str(simId) + " totSimCount " + str(totSimCount)
+                            print "[LOG]: Ranged " + str(rangedCommand)
+
+                        # perform the test 
+                        toBeWritten, bestCommand = self.performanceTest(regularCommand, simId, rangedCommand, totSimCount)
+                        
+                        if self.args.loglevel > 0:
+                            print("[LOG]: Finish simulation for simID: " + str(sortedSys[configID].split(None, 2)[1]))
+                       
+                        # update the bestperformance and bestcommand (for those who yield fastest)
+                        self.isNewPerformanceBetter(toBeWritten, bestCommand)
 
         return self.bestPerformance, self.bestCommand
 
@@ -731,6 +843,9 @@ combinerIntensity.*:\t\t\t\tcombinerIntensity\n\
         print self.bestCommand
 
         listOfWords = self.bestCommand.split()
+
+        queueIDs_params = []
+        schQueues_params = []
 
         results = [0] * 34
         for word in listOfWords:
@@ -803,7 +918,31 @@ combinerIntensity.*:\t\t\t\tcombinerIntensity\n\
                 results[32] = listOfWords.index(word) + 1
             elif word == '--combinerIntensity':
                 results[33] = listOfWords.index(word) + 1
+            elif word == '--queueIDs':
+                # get all queueID parameters
+                done = False
+                i = 1
+                while not done:
+                    # first make sure that the index exists
+                    # then make sure that the element in that index contains some numbers (which means that it is a parameter)
+                    if ((listOfWords.index(word) + i) < len(listOfWords)) and re.search('[0-9]', str(listOfWords[listOfWords.index(word) + i])):
+                        queueIDs_params.append(str(listOfWords[listOfWords.index(word) + i]))
+                        i += 1
+                    else:
+                        done = True
 
+            elif word == '--schQueues':
+                # get all schQueues parameters
+                done = False
+                i = 1
+                while not done:
+                    # first make sure that the index exists
+                    # then make sure that the element in that index contains some numbers (which means that it is a parameter)
+                    if ((listOfWords.index(word) + i) < len(listOfWords)) and re.search('[0-9]', str(listOfWords[listOfWords.index(word) + i])):
+                        schQueues_params.append(str(listOfWords[listOfWords.index(word) + i]))
+                        i += 1
+                    else:
+                        done = True
 
         if results[0] != 0:
             print "Memory: " + str(listOfWords[results[0]])
@@ -874,13 +1013,25 @@ combinerIntensity.*:\t\t\t\tcombinerIntensity\n\
         if results[33] != 0:
             print "Combiner Intensity: " + str(listOfWords[results[33]])
 
-        print "Cluster Cost: " + str(self.simID_clusterCost[str(self.bestPerformance.split(None, 1)[0])])
+        # print contents of queue IDs and corresponding capacities
+        if len(queueIDs_params) > 0:
+
+            print "Queue IDs: ",
+            for qID in queueIDs_params:
+                print str(qID) + " ",
+
+        if len(schQueues_params) > 0:
+
+            print "\nScheduler Queue Capacities: ",
+            for sCap in schQueues_params:
+                print str(sCap) + " ",
+
+        print "\nCluster Cost: " + str(self.simID_clusterCost[str(self.bestPerformance.split(None, 1)[0])])
 
 # Use a first order RSM (y = Bo + B1X1 + B2X2 + ... + BnXn, where n = number of res)
 
 try:
     start_time = time.time()
-
     greedy = RecommendationEngine()
     numberOfConfigs = greedy.eliminate()
     bestPerf, bestCmd = greedy.tester()
@@ -889,5 +1040,5 @@ try:
 
     greedy.presentResult()
 except IOError, e:
-    print "Interrupted..."
+    print "[LOG]: Interrupted..."
     sys.exit()

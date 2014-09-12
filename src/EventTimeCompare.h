@@ -26,6 +26,7 @@
 #ifndef EVENTTIMECOMPARE_H_
 #define EVENTTIMECOMPARE_H_
 
+#include <queue>
 #include "Event.h"
 #include "LogMessages.h"
 

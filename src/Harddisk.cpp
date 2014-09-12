@@ -31,9 +31,7 @@
 #define CFQ_QUANTA 0.1		// CFQ with max. 1 second quanta
 
 Harddisk::Harddisk(size_t maxReadSpeed, size_t maxWriteSpeed, size_t minReadSpeed, size_t minWriteSpeed, enum DistributionType delayType, enum TimeType unit, double delayratio):
-		  delayType_(delayType), unit_(unit),
-		  delayratio_(delayratio), readCapInUsePercent_(0),
-		  writeCapInUsePercent_(0){
+		  delayType_(delayType), unit_(unit), delayratio_(delayratio), readCapInUsePercent_(0), writeCapInUsePercent_(0){
 
 	// a random generator engine from a real time-based seed:
 	unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
@@ -45,10 +43,6 @@ Harddisk::Harddisk(size_t maxReadSpeed, size_t maxWriteSpeed, size_t minReadSpee
 	remainingWriteCapacity_ = writeDist(generator) + minWriteSpeed;
 	totalReadCapacity_ = remainingReadCapacity_;
 	totalWriteCapacity_ = remainingWriteCapacity_;
-
-	#ifndef TERMINAL_LOG_DISABLED
-	std::cout << "totalWriteCapacity_ " << totalWriteCapacity_/ONE_MB_IN_BYTES << " totalReadCapacity_ " << totalReadCapacity_/ONE_MB_IN_BYTES<< std::endl;
-	#endif
 }
 
 Harddisk::~Harddisk() {
@@ -56,14 +50,13 @@ Harddisk::~Harddisk() {
 
 void Harddisk::saveHDrequest(size_t entityID, Event* ev, int eventBehavior, double neededResourceQuantity){
 
-	if ( entityID_event_.find(entityID) == entityID_event_.end() ) {	// not found
-
-		entityID_event_[entityID].applicationId_ = ev->getApplicationId();
+	if (entityID_event_.find(entityID) == entityID_event_.end()) {	// not found
+		entityID_event_[entityID].applicationId_ = ev->getAppID();
 		entityID_event_[entityID].eventTime_ = ev->getEventTime();
 		entityID_event_[entityID].neededResourceQuantity_ = neededResourceQuantity;
 		entityID_event_[entityID].seizedResQuantity_ =ev->getSeizedResQuantity();
 		entityID_event_[entityID].nextEvent_ =ev->getNextEventType();
-		entityID_event_[entityID].destinationEventType_ = ev->getDestinationEventType();
+		entityID_event_[entityID].destinationEventType_ = ev->getDestEventType();
 		entityID_event_[entityID].eventBehavior_ =ev->getEventBehavior();
 		entityID_event_[entityID].entityType_ =ev->getEntityIns().getEntityType();
 		entityID_event_[entityID].attribute_ = ev->getEntityIns().getAttribute();
@@ -120,7 +113,6 @@ int Harddisk::calculateIOSpeed(double *estimatedIOSpeed, int *capInUsePercent, d
 	/*
 	 * CFQ resource usage.
 	 */
-
 	if(!readCapInUsePercent_ && !writeCapInUsePercent_){
 		*estimatedIOSpeed = totIOcapacity;
 		*capInUsePercent = 10;
@@ -131,27 +123,21 @@ int Harddisk::calculateIOSpeed(double *estimatedIOSpeed, int *capInUsePercent, d
 double Harddisk::calculateReadSpeed(){
 	double estimatedReadSpeed;
 	calculateIOSpeed(&estimatedReadSpeed, &readCapInUsePercent_, totalReadCapacity_);
-
 	return estimatedReadSpeed;
 }
 
 double Harddisk::calculateWriteSpeed(){
 	double estimatedWriteSpeed;
 	calculateIOSpeed(&estimatedWriteSpeed, &writeCapInUsePercent_, totalWriteCapacity_);
-
 	return estimatedWriteSpeed;
 }
 
 void Harddisk::readInterWork(double neededResourceQuantity, Event* ev, int outputEventType, int nextEvent, int queueID){
 	double transferSpeed;
 	// delay and create a "read complete" event to be sent to the worker node
-	#ifndef TERMINAL_LOG_DISABLED
-	std::cout<< "readInterWork nodeID: " << ev->getDestinationEventType() << " readCapInUsePercent_ " << readCapInUsePercent_ << " writeCapInUsePercent_ " << writeCapInUsePercent_ << std::endl;
-	#endif
 	if(readCapInUsePercent_ + writeCapInUsePercent_ < 10){
 		// seize local resources
 		transferSpeed = calculateReadSpeed();
-
 		// seize local resources
 		remainingReadCapacity_ -= transferSpeed;
 		delay(neededResourceQuantity, ev->getEventTime(), transferSpeed, ev, outputEventType);
@@ -159,7 +145,7 @@ void Harddisk::readInterWork(double neededResourceQuantity, Event* ev, int outpu
 	else{
 		struct waitingQueueElement waitingEvent;
 
-		setWaitingEvent(&waitingEvent, ev->getApplicationId(), ev->getEventTime(), neededResourceQuantity, ev->getDestinationEventType(), nextEvent, ev->getEntityIns().getEntityId(),
+		setWaitingEvent(&waitingEvent, ev->getAppID(), ev->getEventTime(), neededResourceQuantity, ev->getDestEventType(), nextEvent, ev->getEntityIns().getEntityId(),
 				ev->getEntityIns().getEntityType(), ev->getEntityIns().getAttribute(), ev->getFsLoc(), ev->getFsId(), ev->getRedId(), ev->getRecordId(), ev->getSpillTally());
 
 		waitingEvent.type_ = true;	// true: read
@@ -171,7 +157,7 @@ void Harddisk::readInterWork(double neededResourceQuantity, Event* ev, int outpu
 		}
 		else{
 			// enqueue "wait for local read" event (when a resource is released queue will be checked)
-			waitingEvent.outputEventType_ = ev->getDestinationEventType();
+			waitingEvent.outputEventType_ = ev->getDestEventType();
 
 			if(queueID == HD_READ_FOR_MAP_TASK || queueID == HD_READ_MAP_OUTPUT || queueID == HD_READ_DATA_TO_SHUFFLE || queueID == HD_READ_SHUFFLED_DATA || queueID == HD_READ_TO_MERGE ||  queueID == HD_READ_TOBE_SORTED_REDUCE_DATA){
 				waitingQueue_.push(waitingEvent);
@@ -180,44 +166,31 @@ void Harddisk::readInterWork(double neededResourceQuantity, Event* ev, int outpu
 				std::cerr << "Error: Unexpected queueID type in HD! " << std::endl;
 			}
 		}
-		#ifndef TERMINAL_LOG_DISABLED
-		std::cout<< "Read Enqueue " << ev->getFsId() << " at "<< ev->getEventTime() << " queueID " << queueID << " waitingQueue_.size(): " << waitingQueue_.size() << " nodeID " << ev->getDestinationEventType()<<
-				" readCapInUsePercent_ " << readCapInUsePercent_ << " writeCapInUsePercent_ " << writeCapInUsePercent_ << std::endl;
-		#endif
 	}
 }
 
 void Harddisk::writeInterWork(double neededResourceQuantity, Event* ev, int outputEventType, int nextEvent, int queueID){
 	double transferSpeed;
 	// delay and create a "write complete" event which will read the written data
-	#ifndef TERMINAL_LOG_DISABLED
-	std::cout<< "writeInterWork nodeID: " << ev->getDestinationEventType() << " readCapInUsePercent_ " << readCapInUsePercent_ << " writeCapInUsePercent_ " << writeCapInUsePercent_ << std::endl;
-	#endif
+
 	if(readCapInUsePercent_ + writeCapInUsePercent_ < 10){
 		// seize local resources
 		transferSpeed = calculateWriteSpeed();
 		// seize local resources
 		remainingWriteCapacity_ -= transferSpeed;
 		delay(neededResourceQuantity, ev->getEventTime(), transferSpeed, ev, outputEventType);
-		#ifndef TERMINAL_LOG_DISABLED
-		std::cout << " readCapInUsePercent_ + writeCapInUsePercent_ " << readCapInUsePercent_ + writeCapInUsePercent_ << " queueID " << queueID <<std::endl;
-		#endif
 	}
 	else{
 		// enqueue "wait for local write" event (when a resource is released queue will be checked)
 		struct waitingQueueElement waitingEvent;
 
-		setWaitingEvent(&waitingEvent, ev->getApplicationId(), ev->getEventTime(), neededResourceQuantity, ev->getDestinationEventType(), nextEvent, ev->getEntityIns().getEntityId(),
+		setWaitingEvent(&waitingEvent, ev->getAppID(), ev->getEventTime(), neededResourceQuantity, ev->getDestEventType(), nextEvent, ev->getEntityIns().getEntityId(),
 				ev->getEntityIns().getEntityType(), ev->getEntityIns().getAttribute(), ev->getFsLoc(), ev->getFsId(), ev->getRedId(), ev->getRecordId(), ev->getSpillTally());
 
 		waitingEvent.type_ = false;	// false: write
 		if(queueID == HD_WRITE_TO_LOCAL || queueID == HD_WRITE_TRANSFERRED_TO_LOCAL || queueID == HD_WRITE_MERGED_DATA || queueID == HD_WRITE_SHUFFLE_DATA_TO_DISK
 				|| queueID == HD_WRITE_REDUCE_OUTPUT || queueID == HD_WRITE_SORTED_REDUCE_DATA){
 			waitingQueue_.push(waitingEvent);
-			#ifndef TERMINAL_LOG_DISABLED
-			std::cout<< "Write Enqueue " << ev->getFsId() << " at "<< ev->getEventTime() << " queueID " << queueID << " waitingQueue_.size(): " << waitingQueue_.size() << " nodeID " <<
-					ev->getDestinationEventType()<< " readCapInUsePercent_ " << readCapInUsePercent_ << " writeCapInUsePercent_ " << writeCapInUsePercent_ <<std::endl;
-			#endif
 		}
 		else{
 			std::cerr << "Error: Unexpected queueID type in HD! " << std::endl;
@@ -232,29 +205,15 @@ void Harddisk::checkWaitingQueue(Event* ev, int outputEventType){
 		// check resource availability
 
 		if (readCapInUsePercent_ + writeCapInUsePercent_ < 10){
-			#ifndef TERMINAL_LOG_DISABLED
-			std::cout<< "WaitingQueue is not empty and resource available! node: " << ev->getDestinationEventType() << std::endl;
-			#endif
 			if (waitingQueue_.front().type_){	// read req.
 				transferSpeed = calculateReadSpeed();
-
 				// seize local resources
 				remainingReadCapacity_ -= transferSpeed;
-				#ifndef TERMINAL_LOG_DISABLED
-				std::cout<< "Read Dequeue " << waitingQueue_.front().fsId_ << " at "<< ev->getEventTime() << " evbeh "<< waitingQueue_.front().nextEvent_  << " waitingQueue_.size(): " << waitingQueue_.size() -1 <<
-						" nodeID " << ev->getDestinationEventType()<< " readCapInUsePercent_ " << readCapInUsePercent_ << " writeCapInUsePercent_ " << writeCapInUsePercent_ << " time " <<
-						ev->getEventTime() <<std::endl;
-				#endif
 			}
 			else{	// write rq.
 				transferSpeed = calculateWriteSpeed();
 				// seize local resources
 				remainingWriteCapacity_ -= transferSpeed;
-				#ifndef TERMINAL_LOG_DISABLED
-				std::cout<< "Write Dequeue " << waitingQueue_.front().fsId_ << " at "<< ev->getEventTime() << " evbeh "<< waitingQueue_.front().nextEvent_ <<  " waitingQueue_.size(): " << waitingQueue_.size() -1 <<
-						" nodeID " << ev->getDestinationEventType()<< " waitingQueue_.front().neededResourceQuantity_ "<< waitingQueue_.front().neededResourceQuantity_<<
-						" readCapInUsePercent_ " << readCapInUsePercent_ << " writeCapInUsePercent_ " << writeCapInUsePercent_ << std::endl;
-				#endif
 			}
 
 			Event newEvent(waitingQueue_.front().applicationId_, waitingQueue_.front().eventTime_, waitingQueue_.front().neededResourceQuantity_, 0, waitingQueue_.front().outputEventType_,
@@ -274,7 +233,6 @@ void Harddisk::checkWaitingQueue(Event* ev, int outputEventType){
 
 void Harddisk::setWaitingEvent(struct waitingQueueElement *waitingEvent, size_t appId, double eventTime, double neededResourceQuantity, int destinationEventType, int nextEvent, size_t entityId,
 		enum EntityType entityType, int attribute, int fsLoc, int fsId, int redID, int recordID, size_t spillTally){
-
 	waitingEvent->applicationId_ = appId;
 	waitingEvent->eventTime_ = eventTime;
 	waitingEvent->neededResourceQuantity_ = neededResourceQuantity;
@@ -291,7 +249,6 @@ void Harddisk::setWaitingEvent(struct waitingQueueElement *waitingEvent, size_t 
 }
 
 void Harddisk::releaseIOResources(double seizedSpeedCapacity, double* remainingIoCapacity, int* capInUsePercent, double totCapacity){
-
 	// release seized local resource (which is the seized read or write capacity of hd)
 	*remainingIoCapacity += seizedSpeedCapacity;
 	*capInUsePercent = 0;
@@ -300,16 +257,11 @@ void Harddisk::releaseIOResources(double seizedSpeedCapacity, double* remainingI
 void Harddisk::releaseReadResources(double seizedReadSpeedCapacity, Event* ev, int outputEventType, int op){
 	releaseIOResources(seizedReadSpeedCapacity, &remainingReadCapacity_, &readCapInUsePercent_, totalReadCapacity_);
 
-	#ifndef TERMINAL_LOG_DISABLED
-	std::cout<< "Release evbeh " << ev->getEventBehavior() << " at node: " << ev->getDestinationEventType() << " readCapInUsePercent_ " << readCapInUsePercent_ <<
-			" writeCapInUsePercent_ " << writeCapInUsePercent_ << " queueSize " << waitingQueue_.size()<< " time " << ev->getEventTime() << std::endl;
-	#endif
-
 	if(op == HD_CFQ_EVENT){
 		// enqueue the remaining part to the end of queue
 
 		struct waitingQueueElement waitingEvent;
-		setWaitingEvent(&waitingEvent, ev->getApplicationId(), ev->getEventTime(), ev->getNeededResQuantity(), ev->getDestinationEventType(), getHDrequest(ev->getEntityIns().getEntityId()).completionEvBeh, ev->getEntityIns().getEntityId(),
+		setWaitingEvent(&waitingEvent, ev->getAppID(), ev->getEventTime(), ev->getNeededResQuantity(), ev->getDestEventType(), getHDrequest(ev->getEntityIns().getEntityId()).completionEvBeh, ev->getEntityIns().getEntityId(),
 				ev->getEntityIns().getEntityType(), ev->getEntityIns().getAttribute(), ev->getFsLoc(), ev->getFsId(), ev->getRedId(), ev->getRecordId(), ev->getSpillTally());
 
 		if(waitingEvent.nextEvent_ == FS_RECORD_READ_FINISH || waitingEvent.nextEvent_ == RECEIVE_FS_TRANSFER_REQUEST || waitingEvent.nextEvent_ == MERGE_PARTITIONS_FOR_REDUCER || waitingEvent.nextEvent_ == SHUFFLE_READ_DATA_COMPLETE ||
@@ -322,7 +274,7 @@ void Harddisk::releaseReadResources(double seizedReadSpeedCapacity, Event* ev, i
 			}
 			else{
 				// enqueue "wait for local read" event (when a resource is released queue will be checked)
-				waitingEvent.outputEventType_ = ev->getDestinationEventType();
+				waitingEvent.outputEventType_ = ev->getDestEventType();
 			}
 			waitingQueue_.push(waitingEvent);
 		}
@@ -336,22 +288,17 @@ void Harddisk::releaseReadResources(double seizedReadSpeedCapacity, Event* ev, i
 void Harddisk::releaseWriteResources(double seizedWriteSpeedCapacity, Event* ev, int outputEventType, int op){
 	releaseIOResources(seizedWriteSpeedCapacity, &remainingWriteCapacity_, &writeCapInUsePercent_, totalWriteCapacity_);
 
-	#ifndef TERMINAL_LOG_DISABLED
-	std::cout<< "Release evbeh " << ev->getEventBehavior() << " at node: " << ev->getDestinationEventType() << " readCapInUsePercent_ " << readCapInUsePercent_ << " writeCapInUsePercent_ " <<
-			writeCapInUsePercent_ << " queueSize " << waitingQueue_.size()<< " time " << ev->getEventTime()<< std::endl;
-	#endif
-
 	if(op == HD_CFQ_EVENT){
 		// enqueue the remaining part to the end of queue
 
 		struct waitingQueueElement waitingEvent;
-		setWaitingEvent(&waitingEvent, ev->getApplicationId(), ev->getEventTime(), ev->getNeededResQuantity(), ev->getDestinationEventType(), getHDrequest(ev->getEntityIns().getEntityId()).completionEvBeh, ev->getEntityIns().getEntityId(),
+		setWaitingEvent(&waitingEvent, ev->getAppID(), ev->getEventTime(), ev->getNeededResQuantity(), ev->getDestEventType(), getHDrequest(ev->getEntityIns().getEntityId()).completionEvBeh, ev->getEntityIns().getEntityId(),
 				ev->getEntityIns().getEntityType(), ev->getEntityIns().getAttribute(), ev->getFsLoc(), ev->getFsId(), ev->getRedId(), ev->getRecordId(), ev->getSpillTally());
 
 		if(waitingEvent.nextEvent_ == RELEASE_FS_TRANSFERRED_WRITE_RES || waitingEvent.nextEvent_ == MAP_MERGE_READY || waitingEvent.nextEvent_ == MAP_MERGE_WB_COMPLETE ||
 				waitingEvent.nextEvent_ == SHUFFLE_WRITE_DATA_PARTIALLY_COMPLETE || waitingEvent.nextEvent_ == WRITE_REDUCE_OUTPUT || waitingEvent.nextEvent_ == RELEASE_AND_DONE_REDUCE_SORT){	// write request
 			waitingEvent.type_ = false;	// false: write
-			waitingEvent.outputEventType_ = ev->getDestinationEventType();
+			waitingEvent.outputEventType_ = ev->getDestEventType();
 			waitingQueue_.push(waitingEvent);
 		}
 		else{
@@ -362,7 +309,6 @@ void Harddisk::releaseWriteResources(double seizedWriteSpeedCapacity, Event* ev,
 }
 
 void Harddisk::work (int op, double neededResourceQuantity, Event* ev, int outputEventType){
-
 	// read
 	if(op == HD_READ_FOR_MAP_TASK || op == HD_READ_FROM_REMOTE || op == HD_READ_MAP_OUTPUT || op == HD_READ_DATA_TO_SHUFFLE || op == HD_READ_SHUFFLED_DATA
 			|| op == HD_READ_TO_MERGE || op == HD_READ_TOBE_SORTED_REDUCE_DATA){
@@ -433,7 +379,6 @@ void Harddisk::work (int op, double neededResourceQuantity, Event* ev, int outpu
 		}
 		// save hd request
 		saveHDrequest(ev->getEntityIns().getEntityId(), ev, completionEvBeh, neededResourceQuantity);
-
 		writeInterWork(neededResourceQuantity, ev, outputEventType, completionEvBeh, op);
 	}
 
@@ -490,41 +435,38 @@ void Harddisk::delayHelper(double newEventTime, double neededResourceQuantity, d
 	// generate new output event, enqueue to eventsList
 	if(evBehavior == RECEIVE_FS_TRANSFER_REQUEST){ // remote (one event to release. one event to transfer)
 		// release
-		Event newEvent(ev->getApplicationId(), newEventTime, 0.0, seizedResource, ev->getDestinationEventType(), ev->getDestinationEventType(),
+		Event newEvent(ev->getAppID(), newEventTime, 0.0, seizedResource, ev->getDestEventType(), ev->getDestEventType(),
 				RELEASE_REMOTE_FS_READ_RES, ev->getEntityIns().getEntityType(), SEIZETOMASTER, ev->getEntityIns().getAttribute(), ev->getFsLoc(), ev->getFsId(), ev->getRedId(), ev->getRecordId(), ev->getSpillTally());
 		eventsList.push(newEvent);
 		// start transfer
-		Event newEvent2(ev->getApplicationId(), newEventTime, neededResourceQuantity, 0.0, outputEventType, ev->getEntityIns().getAttribute(),
+		Event newEvent2(ev->getAppID(), newEventTime, neededResourceQuantity, 0.0, outputEventType, ev->getEntityIns().getAttribute(),
 				WRITE_TRANSFERRED_FS_TO_LOCAL, ev->getEntityIns().getEntityType(), SEIZETOMASTER, ev->getEntityIns().getAttribute(), ev->getFsLoc(), ev->getFsId(), ev->getRedId(), ev->getRecordId(), ev->getSpillTally());
 		eventsList.push(newEvent2);
 	}
 	else if(evBehavior == FS_RECORD_READ_FINISH || evBehavior == RELEASE_FS_TRANSFERRED_WRITE_RES || evBehavior == MAP_MERGE_READY || evBehavior == MERGE_PARTITIONS_FOR_REDUCER || evBehavior == MAP_MERGE_WB_COMPLETE
 			|| evBehavior == SHUFFLE_READ_DATA_COMPLETE || evBehavior == SHUFFLE_WRITE_DATA_PARTIALLY_COMPLETE || evBehavior == WRITE_REDUCE_OUTPUT || evBehavior == START_REDUCE_FUNC || evBehavior == ON_DISK_MERGE_READ_COMPLETE
 			|| evBehavior == RELEASE_AND_START_REDUCE_SORT || evBehavior == RELEASE_AND_DONE_REDUCE_SORT){
-		#ifndef TERMINAL_LOG_DISABLED
-		std::cout<< "evBehavior " << evBehavior << " newEventTime " << newEventTime << " destination " << ev->getDestinationEventType()<<std::endl;
-		#endif
 
-		Event newEvent(ev->getApplicationId(), newEventTime, neededResourceQuantity, seizedResource, ev->getDestinationEventType(), ev->getDestinationEventType(),
+		Event newEvent(ev->getAppID(), newEventTime, neededResourceQuantity, seizedResource, ev->getDestEventType(), ev->getDestEventType(),
 				evBehavior, ev->getEntityIns().getEntityType(), SEIZETOMASTER, ev->getEntityIns().getAttribute(), ev->getFsLoc(), ev->getFsId(), ev->getRedId(), ev->getRecordId(), ev->getSpillTally());
 		eventsList.push(newEvent);
 
 		if(evBehavior == FS_RECORD_READ_FINISH && ev->getRecordId() && incCheckForFsIdNextPost(ev->getFsId(), ev->getSpillTally())){ // nonzero ev->getRecordId() and total count is a multiple of BUFFER_NUMBER_OF_PACKETS
 			// it produces an event to read another record from the same fsId if there exist any (as an input to map function)
-			Event newEvent(ev->getApplicationId(), newEventTime, -1, -1, ev->getDestinationEventType(), ev->getDestinationEventType(),
+			Event newEvent(ev->getAppID(), newEventTime, -1, -1, ev->getDestEventType(), ev->getDestEventType(),
 					READ_NEW_RECORD, MAPTASK, SEIZETOMASTER, ev->getEntityIns().getAttribute(), ev->getFsLoc(), ev->getFsId(), ev->getRedId(), ev->getRecordId(), ev->getSpillTally());
 			eventsList.push(newEvent);
 		}
 		else if(evBehavior == START_REDUCE_FUNC && ev->getRecordId() && incCheckForFsIdNextPost(ev->getRedId(), ev->getSpillTally())){
 			// create a new event for the first record to be read at HD
-			Event newEvent(ev->getApplicationId(), newEventTime, -1, -1, ev->getDestinationEventType(), ev->getDestinationEventType(),
+			Event newEvent(ev->getAppID(), newEventTime, -1, -1, ev->getDestEventType(), ev->getDestEventType(),
 					READ_REDUCE_RECORDS_TO_SORT, REDUCETASK, SEIZETOMASTER, ev->getEntityIns().getAttribute(), ev->getFsLoc(), ev->getFsId(), ev->getRedId(), ev->getRecordId(), ev->getSpillTally());
 			eventsList.push(newEvent);
 		}
 	}
 	else if(evBehavior == HD_CFQ_EVENT){		// evBehavior == 100: perform given i/o operation then enqueue remaining job to waitingQueue upon completion with the following event
 		// neededResourceQuantity: remaining data to be read / write. seizedResource: transfer speed used to determine how much resource to release
-		Event newEvent(ev->getApplicationId(), newEventTime, neededResourceQuantity, seizedResource, ev->getDestinationEventType(), ev->getDestinationEventType(),
+		Event newEvent(ev->getAppID(), newEventTime, neededResourceQuantity, seizedResource, ev->getDestEventType(), ev->getDestEventType(),
 				evBehavior, ev->getEntityIns().getEntityType(), SEIZETOMASTER, ev->getEntityIns().getAttribute(), ev->getFsLoc(), ev->getFsId(), ev->getRedId(), ev->getRecordId(), ev->getSpillTally());
 
 		// this is required for detection of entry in entityID_event_
@@ -546,9 +488,6 @@ void Harddisk::delay (double neededResourceQuantity, double currentTime, double 
 
 	switch (delayType_){
 		case UNIFORM:{
-			#ifndef TERMINAL_LOG_DISABLED
-			std::cout << "in UNIFORM" << std::endl;
-			#endif
 
 			// Adjust time units to be stored as seconds in simulation time
 			if (unit_ == MINUTES){
@@ -564,9 +503,6 @@ void Harddisk::delay (double neededResourceQuantity, double currentTime, double 
 
 			break;}
 		case EXPONENTIAL:{
-			#ifndef TERMINAL_LOG_DISABLED
-			std::cout << "in EXPONENTIAL" << std::endl;
-			#endif
 
 			std::exponential_distribution<double> exponential(EXP_HD_DELAY_CONSTANT/additionalDelay);
 
@@ -582,9 +518,6 @@ void Harddisk::delay (double neededResourceQuantity, double currentTime, double 
 
 			break;}
 		case CONSTANT:{
-			#ifndef TERMINAL_LOG_DISABLED
-			std::cout << "in CONSTANT" << std::endl;
-			#endif
 
 			if (unit_ == MINUTES){
 				newEventTime += MINUTE_IN_SEC*additionalDelay;
@@ -603,7 +536,6 @@ void Harddisk::delay (double neededResourceQuantity, double currentTime, double 
 	}
 
 	if(baseTransferTime > CFQ_QUANTA){
-
 		// run the read / write operation for CFQ_QUANTA seconds then upon completion of CFQ_QUANTA
 		// seconds release the seized resources and enqueue back to waiting queue to complete remaining part.
 
@@ -615,7 +547,6 @@ void Harddisk::delay (double neededResourceQuantity, double currentTime, double 
 	}
 	else{	// the last i/o operation. no need to enqueue back to the waiting queue. proceed to the next intended node event (i.e. read / write complete)
 		hdCFQdata recoveredCFQdata =  getHDrequest(ev->getEntityIns().getEntityId());
-
 		Event newEvent(recoveredCFQdata.applicationId_, recoveredCFQdata.eventTime_, recoveredCFQdata.neededResourceQuantity_, recoveredCFQdata.seizedResQuantity_, recoveredCFQdata.nextEvent_,
 				recoveredCFQdata.destinationEventType_, recoveredCFQdata.eventBehavior_, recoveredCFQdata.entityType_, SEIZETOMASTER, recoveredCFQdata.attribute_, recoveredCFQdata.fsLoc_,
 				recoveredCFQdata.fsId_, recoveredCFQdata.redID_, recoveredCFQdata.recordID_, recoveredCFQdata.spillTally_);

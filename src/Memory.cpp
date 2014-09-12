@@ -38,7 +38,6 @@ Memory::Memory(size_t maxReadSpeed, size_t maxWriteSpeed, size_t minReadSpeed, s
 	// a random generator engine from a real time-based seed:
 	unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
 	std::default_random_engine generator (seed);
-
 	std::uniform_real_distribution<double> 	readDist (0, (maxReadSpeed - minReadSpeed));
 	std::uniform_real_distribution<double> writeDist (0, (maxWriteSpeed - minWriteSpeed));
 	// time is updated here
@@ -50,14 +49,12 @@ Memory::~Memory() {
 }
 
 void Memory::work (Event* ev){
-
 }
 
 void Memory::delay (Event ev, double currentTime, int transferSpeed){
 	// a random generator engine from a real time-based seed:
 	unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
 	std::default_random_engine generator (seed);
-
 	double baseTransferTime = ev.getNeededResQuantity() / transferSpeed;
 	double newEventTime = currentTime + baseTransferTime;
 	double high = baseTransferTime * delayratio_;
@@ -65,8 +62,6 @@ void Memory::delay (Event ev, double currentTime, int transferSpeed){
 	switch (delayType_){
 
 		case UNIFORM:{
-			std::cout << "in UNIFORM" << std::endl;
-
 			// Adjust time units to be stored as seconds in simulation time
 			if (unit_ == MINUTES){
 				high *= MINUTE_IN_SEC;
@@ -81,8 +76,6 @@ void Memory::delay (Event ev, double currentTime, int transferSpeed){
 
 			break;}
 		case EXPONENTIAL:{
-			std::cout << "in EXPONENTIAL" << std::endl;
-
 			std::exponential_distribution<double> exponential(high*EXP_MEM_DELAY_CONSTANT);
 
 			if (unit_ == MINUTES){
@@ -95,11 +88,8 @@ void Memory::delay (Event ev, double currentTime, int transferSpeed){
 				newEventTime += exponential(generator);
 			}
 
-
 			break;}
 		case CONSTANT:{
-			std::cout << "in CONSTANT" << std::endl;
-
 			if (unit_ == MINUTES){
 				newEventTime += MINUTE_IN_SEC*high;
 			}
@@ -109,7 +99,6 @@ void Memory::delay (Event ev, double currentTime, int transferSpeed){
 			else{
 				newEventTime += high;
 			}
-
 			break;}
 		default:{
 			std::cout << "Incorrect delay type!" << std::endl;
@@ -126,34 +115,29 @@ size_t Memory::getRemainingCapacity() const {
 	return remainingCapacity_;
 }
 
-double Memory::getResetDataWaitingForSpill(int redID) {
-	double temp = dataWaitingForSpill_[redID];
-	dataWaitingForSpill_[redID] = 0;
-	numberOfMapOutputsWaitingForSpill_[redID] = 0;
+double Memory::getResetDataWaitingForSpill(int redID, int appID) {
+	double temp = dataWaitingForSpill_[std::make_pair(redID,appID)];
+	dataWaitingForSpill_[std::make_pair(redID,appID)] = 0;
+	numberOfMapOutputsWaitingForSpill_[std::make_pair(redID,appID)] = 0;
 	return temp;
 }
 
-bool Memory::addCheckMergeSpill(double dataSize, size_t shuffleMergeLimit, int redID){
+bool Memory::addCheckMergeSpill(double dataSize, size_t shuffleMergeLimit, int redID, int appID){
 
-	if(dataWaitingForSpill_.find(redID) == dataWaitingForSpill_.end()){	// not found
-		dataWaitingForSpill_[redID] = dataSize;
-		numberOfMapOutputsWaitingForSpill_[redID] = 1;
+	if(dataWaitingForSpill_.find(std::make_pair(redID,appID)) == dataWaitingForSpill_.end()){	// not found
+		dataWaitingForSpill_[std::make_pair(redID,appID)] = dataSize;
+		numberOfMapOutputsWaitingForSpill_[std::make_pair(redID,appID)] = 1;
 	}
 	else{
-		dataWaitingForSpill_[redID] += dataSize;
-		numberOfMapOutputsWaitingForSpill_[redID]+=1;
+		dataWaitingForSpill_[std::make_pair(redID,appID)] += dataSize;
+		numberOfMapOutputsWaitingForSpill_[std::make_pair(redID,appID)]+=1;
 	}
-
-	if(dataWaitingForSpill_[redID] > (double)shuffleMergeLimit){
+	if(dataWaitingForSpill_[std::make_pair(redID,appID)] > (double)shuffleMergeLimit){
 		return true;
 	}
 	return false;
 }
 
-void Memory::resetDataWaitingForSpill(int redID) {
-	dataWaitingForSpill_[redID] = 0;
-}
-
-int Memory::getnumberOfMapOutputsWaitingForSpill(int redID){
-	return numberOfMapOutputsWaitingForSpill_[redID];
+int Memory::getnumberOfMapOutputsWaitingForSpill(int redID, int appID){
+	return numberOfMapOutputsWaitingForSpill_[std::make_pair(redID,appID)];
 }

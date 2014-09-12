@@ -61,7 +61,7 @@ Event::Event(const Event& other):
 	setEntityId(other.entityIns_.getEntityId());
 }
 
-Event& Event::operator=( const Event& other) {
+Event& Event::operator=(const Event& other){
 	applicationID_ = other.applicationID_;
 	eventTime_ = other.eventTime_;
 	neededResQuantity_ = other.neededResQuantity_;
@@ -117,11 +117,11 @@ void Event::setSeizedResQuantity(double seizedResQuantity) {
 	seizedResQuantity_ = seizedResQuantity;
 }
 
-size_t Event::getApplicationId() const {
+size_t Event::getAppID() const {
 	return applicationID_;
 }
 
-int Event::getDestinationEventType() const {
+int Event::getDestEventType() const {
 	return destinationEventType_;
 }
 

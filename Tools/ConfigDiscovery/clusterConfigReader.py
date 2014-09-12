@@ -49,7 +49,7 @@ class ConfigReader:
 
         args = parser.parse_args()
         hdfs_in_path = args.hdfs_in_path    # hdfs_in_path
-        self.hd_path = args.hd_path              # hd_path
+        self.hd_path = args.hd_path         # hd_path
 
         args = shlex.split(self.hadoop_home + "/bin/hdfs dfs -du " + hdfs_in_path)
         p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE) # Success!

@@ -55,12 +55,8 @@ MapReduceConf::MapReduceConf(int mapreduceJobReduces, size_t mapreduceInputFilei
 MapReduceConf::~MapReduceConf() {
 }
 
-size_t MapReduceConf::getFileSplitSize() const {
+size_t MapReduceConf::getFsSize() const {
 	return fileSplitSize_;
-}
-
-void MapReduceConf::setFileSplitSize(size_t fsSize){
-	fileSplitSize_ = fsSize;
 }
 
 int MapReduceConf::getMapreduceJobReduces() const {

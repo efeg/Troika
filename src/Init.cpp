@@ -69,23 +69,23 @@ void Init::initUserModules(string fileName, vector<std::shared_ptr<Module>>& eve
 		string line;
 		size_t nodemanagerResManMB=0;
 		queue<MapReduceConf> configurations;	// the order of "configurations" in the input file should be matched with the order of "applications"
-		queue<Cpu> cpus;	// the order of "cpus" in the input file should be matched with the order of "nodes"
+		queue<Cpu> cpus;		// the order of "CPUs" in the input file should be matched with the order of "nodes"
 		queue<Memory> memories;	// the order of "memories" in the input file should be matched with the order of "nodes"
-		queue<Harddisk> harddisks;	// the order of "harddisks" in the input file should be matched with the order of "nodes"
-		vector <int> filesplitlocations;	// the expected event types of nodes where filesplits are located
-		/*int numberofreducers = 1;*/
-		size_t numberOfMappers = 0;
+		queue<Harddisk> harddisks;		// the order of "hard disks" in the input file should be matched with the order of "nodes"
+		queue<vector<int>> fsplitlocs;	// the expected event types of nodes where filesplits are located
+		queue<size_t> numberOfMappers;	// for each application, we have a separate number of mappers
+		queue<int> numberOfReducers;	// for each application, we have a separate number of reducers
 
 		while (getline(infile, line))
 		{
 			istringstream iss(line);
-			char type;	// module type
+			string type;	// module type
 
-			if(!(iss >> type) || type == '#'){
+			if(!(iss >> type) || type == "#"){
 				// empty or comment line
 		    	continue;
 			}
-			if(type == 'c' || type == 'C' ){	// MapReduceConf
+			if(type == "config"){	// MapReduceConf
 
 				int mapreduceJobReduces;
 			    if (!(iss >> mapreduceJobReduces )) {
@@ -123,7 +123,6 @@ void Init::initUserModules(string fileName, vector<std::shared_ptr<Module>>& eve
 			    		|| !(iss >> mapreduceReduceInputBufferPercent) || !(iss >> mapreduceJobUbertaskEnable) || !(iss >> mapreduceJobUbertaskMaxmaps)
 			    		|| !(iss >> mapreduceJobUbertaskMaxreduces) || !(iss >> nodemanagerResourceMemoryMB>> nodemanagerResourceCpuCores)
 			    		|| !(iss >> mapreduce_job_reduce_slowstart_completedmaps) || !(iss >> mapred_child_java_opts)){
-
 
 			    	// START: SET TROIKA PARAMS for 'c'
 				    if(mrInputFileinputformatSplitMinsize_){
@@ -210,30 +209,41 @@ void Init::initUserModules(string fileName, vector<std::shared_ptr<Module>>& eve
 
 				// nodemanagerResourceMemoryMB is set in input file
 				nodemanagerResManMB = nodemanagerResourceMemoryMB;
-
 			}
 
-			else if(type == 'f' || type == 'F' ){	// Filesplit locations
+			else if(type == "filesplit"){	// Filesplit locations
 
-				int isforcedMapTaskCount, numberOfSplits;
-			    if (!(iss >> isforcedMapTaskCount >> numberOfSplits)) {
+				int isforcedMapTaskCount, forcedReduceTaskCount, numberOfSplits;
+			    if (!(iss >> isforcedMapTaskCount >> forcedReduceTaskCount >> numberOfSplits)) {
 			    	cerr << "ERROR: Missing/Corrupted user input in FileSplit Metadata" << endl;
 			    	exit(-1);
 			    }
 
 			    // set filesplit size if number of map tasks is explicitly set within mapreduce code.
 			    if(isforcedMapTaskCount){
-			    	numberOfMappers = numberOfSplits;
+				    numberOfMappers.push(numberOfSplits);
+			    }
+			    else{	// 0 signals that number of map tasks is not set explicitly
+				    numberOfMappers.push(0);
+			    }
+
+			    // set reduce count if it is forced (>0) else set the count to 0 to use the default one in the configuration
+			    if(forcedReduceTaskCount > 0){
+			    	numberOfReducers.push(forcedReduceTaskCount);
+			    }
+			    else{
+			    	numberOfReducers.push(configurations.front().getMapreduceJobReduces());
 			    }
 
 			    int expectedNodeEventType;
+				fsplitlocs.push(vector<int>());
 				for(int i=0;i<numberOfSplits;i++){
 					iss >> expectedNodeEventType;
-					filesplitlocations.push_back(expectedNodeEventType);
+					fsplitlocs.back().push_back(expectedNodeEventType);
 				}
 			}
 
-			else if(type == 'r' || type == 'R'){	// Scheduler Config
+			else if(type == "scheduler"){	// Scheduler Config
 
 				int numberOfQueues;
 			    if (!(iss >> numberOfQueues )) {
@@ -241,11 +251,18 @@ void Init::initUserModules(string fileName, vector<std::shared_ptr<Module>>& eve
 			    	exit(-1);
 			    }
 
+			    if(schQueues_.size()){
+			    	numberOfQueues = schQueues_.size();
+			    }
+
 				int capacityOfQueue;
 				std::vector<double> queueCapacities_;
 				for(int i=0;i<numberOfQueues ;i++){
 					iss >> capacityOfQueue;
 
+					if(schQueues_.size()){
+						capacityOfQueue = schQueues_.at(i);
+					}
 					queueCapacities_.push_back(capacityOfQueue);
 				}
 
@@ -282,8 +299,7 @@ void Init::initUserModules(string fileName, vector<std::shared_ptr<Module>>& eve
 				g_scheduler.setResourceCalculator(resourceCalculator);
 			}
 
-			else if(type == 'a' || type == 'A' ){	// Application
-
+			else if(type == "application" ){	// Application
 				size_t applicationSize, applicationOwnerID;
 				double mapIntensity, mapSortIntensity, reduceIntensity, reduceSortIntensity, mapOutputVolume, reduceOutputVolume, finalOutputVolume;
 				int clientEventType, rmEventType;
@@ -296,6 +312,7 @@ void Init::initUserModules(string fileName, vector<std::shared_ptr<Module>>& eve
 
 		    	// START: SET TROIKA PARAMS for 'a'
 			    // following will be set if there is any external input for applicationSize (e.g. from recommendation engine)
+
 				if(applicationSize_){
 					applicationSize = applicationSize_;
 				}
@@ -322,6 +339,7 @@ void Init::initUserModules(string fileName, vector<std::shared_ptr<Module>>& eve
 				}
 		    	// END: SET TROIKA PARAMS for 'a'
 
+		    	// START: INFITESIMAL
 			    if(!reduceIntensity){
 			    	reduceIntensity = INFITESIMAL;
 			    }
@@ -331,39 +349,42 @@ void Init::initUserModules(string fileName, vector<std::shared_ptr<Module>>& eve
 			    if(!mapSortIntensity){
 			    	mapSortIntensity = INFITESIMAL;
 			    }
-			    if(numberOfMappers){
+			    // END: INFITESIMAL
+
+			    size_t fsSize = configurations.front().getFsSize();
+
+			    // number of mappers
+			    if(numberOfMappers.front()){
 
 			    	// if application size less than the number of mappers, then app size = number of mappers
 			    	// the last file split size is application size - (number of mappers-1)*(application size/number of mappers)
-			    	if(applicationSize < numberOfMappers){
-			    		applicationSize = numberOfMappers;
+			    	if(applicationSize < numberOfMappers.front()){
+			    		applicationSize = numberOfMappers.front();
 			    	}
 
-			    	size_t fsSize;
-			    	if(applicationSize % numberOfMappers){	// there is leftover
-			    		fsSize = (applicationSize / numberOfMappers) +1;
+			    	if(applicationSize % numberOfMappers.front()){	// there is leftover
+			    		fsSize = (applicationSize / numberOfMappers.front()) +1;
 			    	}
 			    	else{	// no leftover
-			    		fsSize = applicationSize / numberOfMappers;
+			    		fsSize = applicationSize / numberOfMappers.front();
 			    	}
-				    configurations.front().setFileSplitSize(fsSize);
 			    }
 
 			    // Used to SET filesplit locations correctly in case the FS size is explicitly changed by TROIKA
 			    // In case the filesplit size is changed by a compute intensive application (such as PI), then that change overwrites
 			    // TROIKA's filesplit size modification
-			    size_t fsSize = configurations.front().getFileSplitSize();
+
 			    size_t numOfMappers = applicationSize/fsSize;
 			    if(applicationSize%fsSize){
 			    	numOfMappers++;
 			    }
 
-			    if(numOfMappers != filesplitlocations.size()){
-			    	int genericLocation = filesplitlocations.front();
-			    	filesplitlocations.clear();
+			    if(numOfMappers != fsplitlocs.front().size()){
+			    	int genericLocation = fsplitlocs.front().front();
+			    	fsplitlocs.front().clear();
 
 					for(size_t i=0;i<numOfMappers;i++){
-						filesplitlocations.push_back(genericLocation);
+						fsplitlocs.front().push_back(genericLocation);
 					}
 			    }
 
@@ -403,10 +424,31 @@ void Init::initUserModules(string fileName, vector<std::shared_ptr<Module>>& eve
 			    	// END: SET TROIKA PARAMS for 'a'
 
 				    applications.push_back(std::make_shared<Application>(applicationSize, applicationOwnerID, mapIntensity, mapSortIntensity, reduceIntensity, reduceSortIntensity, mapOutputVolume, reduceOutputVolume,
-				    		finalOutputVolume, clientEventType, rmEventType, filesplitlocations, queueId, configurations.front(), recordSize, mapCpuVcores, reduceCpuVcores, mapreduceMapMemory,
+				    		finalOutputVolume, clientEventType, rmEventType, fsplitlocs.front(), queueId, configurations.front(), recordSize, mapCpuVcores, reduceCpuVcores, mapreduceMapMemory,
 				    		mapreduceReduceMemory));
 
-				    configurations.pop();
+				    // set number of reducers
+				    applications.back()->setReduceCount(numberOfReducers.front());
+				    numberOfReducers.pop();
+
+				    if(queueIDs_.size()){
+					    applications.back()->setQueueId(queueIDs_.at(applications.back()->getAppID()));
+				    }
+				    else{
+				    	applications.back()->setQueueId(queueId);
+				    }
+
+				    if(numberOfMappers.front()){
+					    // in case fsSize has been explicitly set, make sure it is updated.
+					    applications.back()->setFileSplitSize(fsSize);
+				    }
+				    // pop numberOfMappers
+				    numberOfMappers.pop();
+
+				    // pop fs info
+				    fsplitlocs.pop();
+
+				    // configurations.pop();
 					if(isThereACombiner){ // non-zero isThereACombiner means there is a combiner
 						applications.back()->setCombinerIntensity(combinerIntensity);
 						applications.back()->setCombinerCompressionPercent(combinerCompressionPercent);
@@ -438,17 +480,38 @@ void Init::initUserModules(string fileName, vector<std::shared_ptr<Module>>& eve
 					amResourceMB = amResourceMB_;
 				}
 		    	// END: SET TROIKA PARAMS for 'a'
-
 			    applications.push_back(std::make_shared<Application>(applicationSize, applicationOwnerID, mapIntensity, mapSortIntensity, reduceIntensity, reduceSortIntensity, mapOutputVolume, reduceOutputVolume,
-			    		finalOutputVolume, clientEventType, rmEventType, filesplitlocations, queueId, configurations.front(), recordSize, mapCpuVcores, reduceCpuVcores, mapreduceMapMemory,
+			    		finalOutputVolume, clientEventType, rmEventType, fsplitlocs.front(), queueId, configurations.front(), recordSize, mapCpuVcores, reduceCpuVcores, mapreduceMapMemory,
 			    		mapreduceReduceMemory, amResourceMB, cpuVcores));
-			    configurations.pop();
+
+			    // set number of reducers
+			    applications.back()->setReduceCount(numberOfReducers.front());
+			    numberOfReducers.pop();
+
+			    if(queueIDs_.size()){
+				    applications.back()->setQueueId(queueIDs_.at(applications.back()->getAppID()));
+			    }
+			    else{
+			    	applications.back()->setQueueId(queueId);
+			    }
+
+			    if(numberOfMappers.front()){
+				    // in case fsSize has been explicitly set, make sure it is updated.
+				    applications.back()->setFileSplitSize(fsSize);
+			    }
+			    // pop numberOfMappers
+			    numberOfMappers.pop();
+
+			    // pop fs info
+			    fsplitlocs.pop();
+
+			    // configurations.pop();
 				if(isThereACombiner){ // non-zero isThereACombiner means there is a combiner
 					applications.back()->setCombinerIntensity(combinerIntensity);
 					applications.back()->setCombinerCompressionPercent(combinerCompressionPercent);
 				}
 			}
-			else if(type == 'p' || type == 'P' ){	// CPU
+			else if(type == "processor" ){	// CPU
 
 				int numberOfCores;
 				size_t capacity;
@@ -480,7 +543,7 @@ void Init::initUserModules(string fileName, vector<std::shared_ptr<Module>>& eve
 				cpus.push(Cpu(numberOfCores, capacity, static_cast<DistributionType>(delayType), static_cast<TimeType>(unit), delayratio));
 			}
 
-			else if(type == 'm' || type == 'M' ){	// Memory
+			else if(type == "memory" ){	// Memory
 
 				size_t maxReadSpeed, maxWriteSpeed, minReadSpeed, minWriteSpeed, remainingCapacity;
 				if (!(iss >> maxReadSpeed >> maxWriteSpeed >> minReadSpeed >> minWriteSpeed >> remainingCapacity)) {
@@ -508,7 +571,7 @@ void Init::initUserModules(string fileName, vector<std::shared_ptr<Module>>& eve
 
 				memories.push(Memory(maxReadSpeed, maxWriteSpeed, minReadSpeed, minWriteSpeed, remainingCapacity, static_cast<DistributionType>(delayType), static_cast<TimeType>(unit), delayratio));
 			}
-			else if(type == 'h' || type == 'H' ){	// HardDisk
+			else if(type == "hd" ){	// HardDisk
 
 				size_t maxReadSpeed, maxWriteSpeed, minReadSpeed, minWriteSpeed;
 				if (!(iss >> maxReadSpeed >> maxWriteSpeed >> minReadSpeed >> minWriteSpeed)) {
@@ -546,11 +609,11 @@ void Init::initUserModules(string fileName, vector<std::shared_ptr<Module>>& eve
 				}
 				harddisks.push(Harddisk(maxReadSpeed, maxWriteSpeed, minReadSpeed, minWriteSpeed, static_cast<DistributionType>(delayType), static_cast<TimeType>(unit), delayratio));
 			}
-			else if(type == 'n' || type == 'N' ){	// Node
+			else if(type == "node"){	// Node
 
-				int rackExpectedEventType, nodeType, expectedEventType, outputEventType;
+				int expectedEventType, rackExpectedEventType, nodeType, outputEventType;
 
-				if (!(iss >> rackExpectedEventType >> nodeType >> expectedEventType >> outputEventType)) {
+				if (!(iss >> expectedEventType >> rackExpectedEventType >> nodeType >> outputEventType)) {
 					cerr << "ERROR: Missing/Corrupted user input in NODE" << endl;
 					exit(-1);
 				}
@@ -572,7 +635,7 @@ void Init::initUserModules(string fileName, vector<std::shared_ptr<Module>>& eve
 			    harddisks.pop();
 			    memories.pop();
 			}
-			else if(type == 's' || type == 'S' ){	// Switch
+			else if(type == "switch" ){	// Switch
 
 				int expectedEventType;
 
@@ -585,15 +648,15 @@ void Init::initUserModules(string fileName, vector<std::shared_ptr<Module>>& eve
 					eventExpectingModules.push_back(std::make_shared<Switch>(expectedEventType));
 					continue;
 				}
-
 				eventExpectingModules.push_back(std::make_shared<Switch>(expectedEventType, masterLinkType));
 			}
-			else if(type == 'l' || type == 'L' ){	// Link
+			else if(type == "link"){	// Link
 
+				int expectedEventType;
 				double capacity;
-				int expectedEventType, masterEventType, workerEventType;
+				int  masterEventType, workerEventType;
 
-				if (!(iss >> capacity >> expectedEventType >> masterEventType >> workerEventType)) {
+				if (!(iss >> expectedEventType >> capacity >> masterEventType >> workerEventType)) {
 					cerr << "ERROR: Missing/Corrupted user input in LINK" << endl;
 					exit(-1);
 				}
@@ -629,7 +692,6 @@ void Init::initUserModules(string fileName, vector<std::shared_ptr<Module>>& eve
 							static_cast<DistributionType>(delayType), static_cast<TimeType>(unit)));
 					continue;
 				}
-
 				eventExpectingModules.push_back(std::make_shared<Link>(capacity, expectedEventType, masterEventType, workerEventType, mttr, mtbf,
 											static_cast<DistributionType>(delayType), static_cast<TimeType>(unit), delayratio));
 			}
@@ -662,10 +724,10 @@ void Init::initDES(double *endingCondition, int argc, char* argv[], vector<std::
 			("mrInputFileinputformatSplitMinsize,b", po::value<size_t>()->default_value(0),	"set mapreduce.input.fileinputformat.split.minsize")
 			("mrInputFileinputformatSplitMaxsize,d", po::value<size_t>()->default_value(0),	"set mapreduce.input.fileinputformat.split.maxsize")
 			("dfsBlocksize,g", po::value<size_t>()->default_value(0),				"set dfsBlocksize")
-		    ("mapreduceMapSortSpillPercent,h", po::value<double>()->default_value(0),		"set mapreduce.map.sort.spill.percent")
-			("nodemanagerResourceMemoryMB,j", po::value<size_t>()->default_value(0),		"set nodemanagerResourceMemoryMB")
-			("mapreduceTaskIOSortMb,k", po::value<size_t>()->default_value(0),				"set mapreduceTaskIOSortMb")
-			("mapreducetaskIOSortFactor,n", po::value<int>()->default_value(0),			"set mapreducetaskIOSortFactor")
+		    ("mapreduceMapSortSpillPercent,h", po::value<double>()->default_value(0),	"set mapreduce.map.sort.spill.percent")
+			("nodemanagerResourceMemoryMB,j", po::value<size_t>()->default_value(0),	"set nodemanagerResourceMemoryMB")
+			("mapreduceTaskIOSortMb,k", po::value<size_t>()->default_value(0),			"set mapreduceTaskIOSortMb")
+			("mapreducetaskIOSortFactor,n", po::value<int>()->default_value(0),		"set mapreducetaskIOSortFactor")
 		    ("mapreduceReduceShuffleMergePercent,o", po::value<double>()->default_value(0),			"set mapreduceReduceShuffleMergePercent")
 		    ("mapreduceReduceShuffleInputBufferPercent,z", po::value<double>()->default_value(0),		"set mapreduceReduceShuffleInputBufferPercent")
 		    ("mapreduce_job_reduce_slowstart_completedmaps,q", po::value<double>()->default_value(0),	"set mapreduce_job_reduce_slowstart_completedmaps")
@@ -680,6 +742,8 @@ void Init::initDES(double *endingCondition, int argc, char* argv[], vector<std::
 		    ("reduceIntensity", po::value<double>()->default_value(-1.0),		"set Reduce Intensity")
 		    ("reduceSortIntensity", po::value<double>()->default_value(-1.0),	"set Reduce Sort Intensity")
 		    ("combinerIntensity", po::value<double>()->default_value(-1.0),	"set Combiner Intensity")
+		    ("queueIDs", po::value<std::vector<size_t> >()->multitoken(),	"set CapacityScheduler queueIDs for applications")
+		    ("schQueues", po::value<std::vector<double> >()->multitoken(),	"set number and corresponding capacity of queues")
 		;
 
 		try{
@@ -727,6 +791,13 @@ void Init::initDES(double *endingCondition, int argc, char* argv[], vector<std::
 			reduceIntensity_ = vm["reduceIntensity"].as<double>();
 			reduceSortIntensity_ = vm["reduceSortIntensity"].as<double>();
 			combinerIntensity_ = vm["combinerIntensity"].as<double>();
+
+			if (vm.count("queueIDs")) {
+				queueIDs_ = vm["queueIDs"].as<std::vector<size_t> >();
+			}
+			if(vm.count("schQueues")){
+				schQueues_ = vm["schQueues"].as<std::vector<double> >();
+			}
 
 			// convert ending time to seconds from given timeType
 			if (vm["time-type"].as<string>() == "minute"){

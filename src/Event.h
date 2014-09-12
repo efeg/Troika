@@ -58,9 +58,9 @@ public:
 
 	void setSeizedResQuantity(double seizedResQuantity);
 
-	size_t getApplicationId() const;
+	size_t getAppID() const;
 
-	int getDestinationEventType() const;
+	int getDestEventType() const;
 
 	int getNextEventType() const;
 
@@ -94,18 +94,12 @@ public:
 
 private:
 	size_t applicationID_;
-	double eventTime_;
-	double neededResQuantity_;
-	double seizedResQuantity_;
+	double eventTime_, neededResQuantity_, seizedResQuantity_;
 	int nextEventType_;  // is it an arrival? departure? etc? which module is it heading to?
-	int destinationEventType_;
-	int eventBehavior_;
+	int destinationEventType_, eventBehavior_;
 	enum LinkEventBehavior linkBehavior_;
 	Entity entityIns_;
-	int fsLoc_;
-	int fsID_;
-	int redID_;
-	int recordID_;
+	int fsLoc_, fsID_, redID_, recordID_;
 	size_t spillTally_;
 };
 

@@ -27,23 +27,25 @@
 #define APPLICATION_H_
 
 #include <stdlib.h>
-#include <queue>
 #include <memory>
 #include <map>
 #include "MapReduceConf.h"
 #include "EventTimeCompare.h"
 
 // default resource requirement per application master
-#define YARN_APP_MAPREDUCE_AM_RESOURCE_MB 1536			// Default amount of memory the MR AppMaster needs.
-#define YARN_APP_MAPREDUCE_AM_RESOURCE_CPUVCORES 1 	// Default number of virtual CPU cores the MR AppMaster needs.
-#define MAPREDUCE_MAP_CPU_VCORES 1						// The number of virtual cores required for each map task.
-#define MAPREDUCE_REDUCE_CPU_VCORES 1					// The number of virtual cores required for each reduce task.
-#define EXPECTED_RECORD_SIZE_BYTES 65536				// Determined using real experiment results (User configurable!!)
-#define MAPREDUCE_MAP_MEMORY_MB 1024					// Memory required per map task
-#define MAPREDUCE_REDUCE_MEMORY_MB 1024				// Memory required per reduce task
+#define YARN_APP_MAPREDUCE_AM_RESOURCE_MB 1536		// Default amount of memory the MR AppMaster needs.
+#define YARN_APP_MAPREDUCE_AM_RESOURCE_CPUVCORES 1 // Default number of virtual CPU cores the MR AppMaster needs.
+#define MAPREDUCE_MAP_CPU_VCORES 1					// The number of virtual cores required for each map task.
+#define MAPREDUCE_REDUCE_CPU_VCORES 1				// The number of virtual cores required for each reduce task.
+#define EXPECTED_RECORD_SIZE_BYTES 65536			// Determined using real experiment results (user configurable)
+#define MAPREDUCE_MAP_MEMORY_MB 1024				// Memory required per map task
+#define MAPREDUCE_REDUCE_MEMORY_MB 1024			// Memory required per reduce task
 
-extern std::priority_queue<Event, std::vector<Event>, EventTimeCompare > eventsList;
-extern double simulationTime;	// simulation time
+extern std::vector<std::shared_ptr<Event>> pendingAppEventList;
+extern std::map<size_t, bool> queueID_checkPendingApp;
+extern std::map<size_t, size_t> queueID_checkPendingAppCount;
+extern std::map<size_t, size_t> currentlyRunningAppCount;
+extern double simulationTime;						// Simulation time
 
 struct reducerMergeWaiters{
 	int numberOfChunksWaitingToBeMerged_;
@@ -94,21 +96,15 @@ public:
 			int amCpuVcores=YARN_APP_MAPREDUCE_AM_RESOURCE_CPUVCORES);
 	virtual ~Application();
 
-	size_t getMapperOutputSize(int fsID);
-
-	bool isLastFileSpillReadyForMerge(int fsID) const;
-
-	void saveSpillInfo(int fsID, int nodeEventType, double size);
-
 	void saveReadyToShuffleInfo(int fsID, int nodeEventType, double size);
 
 	void saveReducerCompletionWaiters(double neededResQuantity, int myDest, int attribute, int fsID, int outputEventType);
 
-	size_t getApplicationId() const;
+	size_t getAppID() const;
 
-	size_t getApplicationOwnerId() const;
+	size_t getAppOwnerID() const;
 
-	size_t getApplicationSize() const;
+	size_t getAppSize() const;
 
 	void notifyIncomingOnDiskMergeWrite(int nodeId, int redID);
 
@@ -120,9 +116,7 @@ public:
 
 	const MapReduceConf& getMapReduceConfig() const;
 
-	size_t getFileSplitSize(int);
-
-	size_t getRemainingSplitsToBeProcessed() const;
+	size_t getFsSize(int);
 
 	int getClientEventType() const;
 
@@ -144,21 +138,11 @@ public:
 
 	int getReduceCpuVcores() const;
 
-	int popFileSplitNodeExpectedEventType();
-
 	int getFileSplitNodeExpectedEventType(int index) const;
 
 	size_t getQueueId() const;
 
 	void setAmEventType(int amEventType);
-
-	void pushBackAmControlledMappers(const int& mapperLoc);
-
-	void pushBackAmControlledReducers(const int& reducerLoc);
-
-	int getAmControlledMappers(size_t index) const;
-
-	int getAmControlledReducers(size_t index) const;
 
 	int getSeizedMapCpuVcores() const;
 
@@ -190,13 +174,7 @@ public:
 
 	int addReducerLocations(const int& location);
 
-	bool hasAllReducersCreated() const;
-
 	size_t gettotalReducerCompletionWaiters() const;
-
-	reducerWaiterData popReducerCompletionWaiters();
-
-	bool isReducerCompletionWaitersFull() const;
 
 	bool isReducerCompletionWaitersHasElement() const;
 
@@ -228,8 +206,6 @@ public:
 
 	bool hasReleasedMapperResources(int fsID);
 
-	size_t getTotalChunkSizeWaitingTobeMerged(int nodeId, int redID);
-
 	bool checkIfAllReducersComplete() const;
 
 	double getMapFinishTime() const;
@@ -251,8 +227,6 @@ public:
 	void setShuffleFinishTime(double shuffleFinishTime, int redID);
 
 	double getShuffleStartTime(int redID);
-
-	double getShuffleExperiStartTime(int index, int redID);
 
 	void setShuffleStartTime(double shuffleStartTime, int redID);
 
@@ -288,8 +262,6 @@ public:
 
 	double avgReduceTime() const;
 
-	bool checkMaxSingleShuffleLimitExceed(size_t resourceSize);
-
 	bool addReadyForOnDiskMergeCount_(int redId);
 
 	int subReadyForOnDiskMergeCount_(int redId);
@@ -297,8 +269,6 @@ public:
 	void reduceNumberOfChunksWaitingToBeMerged(int nodeId, int redID);
 
 	void setReduceRecordCount(int redId, int count);
-
-	int getReduceRecordCount(int redId);
 
 	bool areAllReduceRecordComplete(int redId);
 
@@ -310,10 +280,6 @@ public:
 
 	void setMapMergeInfo(int fsID, int redID, int remainingNumberOfMapRecords, bool lastRecordExist, double lastRecordSize);
 
-	int getMapMergeRecordCount(int fsID);
-
-	bool areAllMapRecordComplete(int fsId);
-
 	void addMapMergeReadySize(int fsId, size_t size);
 
 	size_t getMapMergeReadySize(int fsId);
@@ -321,8 +287,6 @@ public:
 	recordInfo getRecordInfo(int fsId);
 
 	void setRecordInfo(int id, size_t eachRecordSize, size_t lastRecordSize, bool lastRecordExist, int remainingMapRecordCount, bool isMapRecord);
-
-	void decrementRecordInfoRemainingMapRecordCount(int fsId);
 
 	recordInfo getReduceRecordInfo(int redId);
 
@@ -344,11 +308,7 @@ public:
 
 	double getCombinerIntensity() const;
 
-	int getShufflePacketCount(int fsID, int redID);
-
 	void setShufflePacketCount(int fsID, int redID, int count);
-
-	bool areAllShufflePacketComplete(int fsId, int redID);
 
 	bool incShuffleCollectedDataAmount(int fsID, int redID, double shuffleCollectedDataAmount);
 
@@ -378,13 +338,9 @@ public:
 
 	void addMergeFnStartTime(int index, double mergeFnStartTime);
 
-	void addMergeFnFinishTime(int index, double mergeFnFinTime);
-
 	int incMergeBufferCompletedPacketCount(int fsID, int redID);
 
 	void resetMergeBufferCompletedPacketCount(int fsID, int redID);
-
-	double getMergeFnTime(int index);
 
 	int decrementMergeInfoNumberOfMapRecords(int fsID, int redID, int decrementAmount);
 
@@ -398,23 +354,13 @@ public:
 
 	double getReducerPartitionSize(int fsID);
 
-	double getTotalMapMergeTime(int index);
-
 	void setShuffleReadStartTime(int index, double time);
 
 	void setShuffleReadFinTime(int index, double time);
 
-	double getShuffleReadTime(int index);
-
 	void setShuffleWriteDataProperties(size_t id, int numberOfPackets, double totalSplitSize, bool lastRecordExist, double lastRecordSize);
 
-	int getShuffleWriteDataProperties_NumPackets(size_t id);
-
 	double getShuffleWriteDataProperties_DataSize(size_t id);
-
-	bool getShuffleWriteDataProperties_lastRecordExist(size_t id);
-
-	double getShuffleWriteDataProperties_lastRecordSize(size_t id);
 
 	int incShuffleWriteDataCount(size_t id);
 
@@ -428,7 +374,7 @@ public:
 
 	void resethuffleWriteDataCount(size_t id);
 
-	void decrementRecordInfoRemainingMapRecordCountAmount(int fsId, int amount);
+	void decRecordInfoRemainingMapRecordCount(int fsId, int count);
 
 	void decrementRecordInfoRemainingReduceRecordCountAmount(int redId, int amount);
 
@@ -436,7 +382,7 @@ public:
 
 	int incShuffleReadBufferCompletedPacketCount(int fsID, int redID);
 
-	int decrementShuffleReadNumberOfRecords(int fsID, int redID, int decrementAmount);
+	int decShuffleReadNumberOfRecords(int fsID, int redID, int decrementAmount);
 
 	int getShuffleReadInfo_remainingNumberOfMapRecords(int fsID, int redID);
 
@@ -448,34 +394,37 @@ public:
 
 	size_t getRecordSize() const;
 
-	double getMapSortIntensity() const;
+	void setAppStartTime(double appStartTime);
+
+	double getAppStartTime() const;
+
+	void setFileSplitSize(size_t fileSplitSize);
+
+	void setQueueId(size_t queueId);
+
+	int getReduceCount() const;
+
+	void setReduceCount(int reduceCount);
 
 private:
 
 	static size_t ID_;
 	size_t applicationID_, applicationSize_, applicationOwnerID_;
-	double mapIntensity_, mapSortIntensity_, reduceIntensity_, reduceSortIntensity_;
-	double mapOutputVolume_, reduceOutputVolume_, finalOutputVolume_;
+	double mapIntensity_, mapSortIntensity_, reduceIntensity_, reduceSortIntensity_, mapOutputVolume_, reduceOutputVolume_, finalOutputVolume_;
 	int clientEventType_, rmEventType_;
-
 	std::vector<int> fileSplitExpectedNodeEvents_;
-	size_t queueId_;			// equivalent of mapreduce.job.queuename (determines which queue the job will be submitted to)
+	size_t queueId_;			// equivalent of mapreduce.job.queuename (determines which queue an application will be submitted to)
 	MapReduceConf mapReduceConfig_;
 	size_t recordSize_;
-	size_t fileSplitSize_;									// Calculated using max(minimumSize, min(maximumSize, blockSize))
-	size_t lastFileSplitSize_;								// the size of last split might be <= fileSplitSize_
-	size_t remainingSplitsToBeProcessed_;					// still needs to be processed in a map task
-	// needed map reduce resources per task
-	int mapCpuVcores_, reduceCpuVcores_;
-	size_t mapreduceMapMemory_, mapreduceReduceMemory_;
-	// needed
-	size_t amResourceMB_;						// The amount of memory the MR AppMaster needs.
-	int amCpuVcores_;							// The number of virtual CPU cores the MR AppMaster needs.
-	std::vector<int> amControlledMappers_, amControlledReducers_;
+	size_t fileSplitSize_;					// calculated using max(minimumSize, min(maximumSize, blockSize))
+	size_t lastFileSplitSize_;				// the size of last split is <= fileSplitSize_
+	size_t remainingSplitsToBeProcessed_;	// still needs to be processed in a map task
+	int mapCpuVcores_, reduceCpuVcores_;	// needed map reduce resources per task
+	size_t mapreduceMapMemory_, mapreduceReduceMemory_, amResourceMB_;	// Memory that different tasks need
+	int amCpuVcores_;						// The number of vCPU cores the MR AppMaster needs.
 	int lastFileSplitExpectedNodeEvent_;
-	size_t totalExpectedNumberofSpills_;		// For regular filesplits
-	size_t totalExpectedNumberofSpillsLast_;	// For the last filesplit
-	std::vector<spillInfo> spillInfo_, readyToShuffleInfo_;
+	size_t totalExpectedNumberofSpills_, totalExpectedNumberofSpillsLast_;	// for regular and the last filesplit
+	std::vector<spillInfo> readyToShuffleInfo_;
 	std::vector<reducerWaiterData> reducerCompletionWaiters_;
 	size_t totalNumberOfMappers_;
 	std::vector<int> reducerLocations_;
@@ -486,30 +435,26 @@ private:
 	std::map<size_t, reduceWriteInfo> reduceWriteid_datasize;
 	std::map<int, double> mapStartTimes_, redStartTimes_, mergeStartTimes_, mergeFnStartTime_, mergeFnFinTime_, mapMergeTime_,shuffleReadTime_, shuffleReadFinTime_, shuffleReadStartTime_;
 	std::map<std::pair<int,int>, double> shuffleStartTimes_, shuffle_collectedDataAmount_, shuffle_flushedDataAmount_, shuffledTotalDataForFsidRedid_;
-	std::map<int, int> reduceMergeId_;								// Reducer event type vs reduce mergeId
+	std::map<int, int> reduceMergeId_, readyForOnDiskMergeCount_, redId_recordId_, redId_DoneRecID_, fsId_recID_, fsId_DoneRecID_, fsId_mapMergeRecordId_, bufferCompletedPacketCount_, fsId_completedMergeCount_;
 	bool reducersRequested_;
-	std::map<int, int> readyForOnDiskMergeCount_, redId_recordId_, redId_CompletedRecordId_, fsId_recordId_, fsId_CompletedRecordId_, fsId_mapMergeRecordId_;
-	std::map<std::pair<int,int>, int> fsId_redID_recordId_, fsId_redID_CompletedPacketId_, bufferMergeCompletedPacketCount_, bufferShuffleReadCompletedPacketCount_;	// used before shuffle to read each packet
+	std::map<std::pair<int,int>, int> fsId_redID_recordId_, fsID_redID_donePcktID_, bufferMergeDonePcktCount_, bufferShuffleReadDonePcktCount_;	// used before shuffle to read each packet
 	std::map<int, size_t> fsId_mapMergeReadysize_;
 	std::map<int, double> parititionSize_;
-	std::map<int, recordInfo> fsID_recordInfo_;
+	std::map<int, recordInfo> fsID_recordInfo_, redID_reduceRecordInfo_;
 	std::map<int, transferInformation> fsID_mapTransferInfo_;
 	std::map<std::pair<int,int>, transferInformation> fsID_mapMergeInfo_, fsID_shuffleReadInfo_;
-	std::map<int,int> bufferCompletedPacketCount_;					// Used in transferring filesplit from remote
 	std::map<size_t, int> bufferShuffleWriteDataCount_;
-	std::map<int, recordInfo> redID_reduceRecordInfo_;
-	std::map<int, int> fsId_completedMergeCount_;
-	bool isThereACombiner_;
-	int completedMapperCount_;
+	bool isThereACombiner_, imReadyToShuffle_;
+	int completedMapperCount_, numberOfCompletedReducers_;
 	double combinerIntensity_, combinerCompressionPercent_, totalMapFinishTime_, totalReduceFinishTime_, totalShuffleFinishTime_;
-	int numberOfCompletedReducers_;
 	// seized map reduce resources per task
-	int seized_mapCpuVcores_, seized_reduceCpuVcores_;
-	size_t seized_mapreduceMapMemory_, seized_mapreduceReduceMemory_;
-	bool imReadyToShuffle_;
-	size_t shuffleMergeLimit_, wb_completed_;
-	int amEventType_;
-	double reduceStartTime_, reduceFinishTime_, mapStartTime_, mapFinishTime_;
+	int seized_mapCpuVcores_, seized_reduceCpuVcores_, amEventType_;
+	size_t seized_mapreduceMapMemory_, seized_mapreduceReduceMemory_, shuffleMergeLimit_, wb_completed_;
+	double reduceStartTime_, reduceFinishTime_, mapStartTime_, mapFinishTime_, appStartTime_;
+	int reduceCount_;
+
+	bool hasAllReducersCreated() const;
+	bool checkMaxSingleShuffleLimitExceed(size_t resourceSize);
 };
 
 #endif /* APPLICATION_H_ */

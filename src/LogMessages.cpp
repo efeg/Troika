@@ -45,38 +45,38 @@ void printNodeMessages(enum NodeType nodeType, int eventBehavior, size_t applica
 	#ifndef TERMINAL_LOG_DISABLED
 	if(nodeType == CLIENT){
 		switch(eventBehavior){
-		case 1: std::cout <<   "Step1: Run Application (in CLIENT - AppID: " << applicationId << ")" << std::endl; break;
-		case 2: std::cout <<   "Step3: Copy App Resources (in CLIENT - AppID: " <<applicationId << ")" << std::endl; break;
-		default: std::cout <<  "in CLIENT - UNRECOGNIZED Event Behavior" << std::endl; break;
+		case 1: std::cout <<   "[INFO] Step1: Run Application (in CLIENT - AppID: " << applicationId << ")" << std::endl; break;
+		case 2: std::cout <<   "[INFO] Step3: Copy App Resources (in CLIENT - AppID: " <<applicationId << ")" << std::endl; break;
+		default: std::cout <<  "[INFO] in CLIENT - UNRECOGNIZED Event Behavior" << std::endl; break;
 		}
 	}
 	else if(nodeType == RESOURCEMANAGER){
 		switch(eventBehavior){
-		case 1: std::cout <<   "Step2: Get Application ID (in RESOURCEMANAGER - AppID: " <<applicationId << ")" << std::endl; break;
-		case 2: std::cout <<   "Step4: Submit Application (in RESOURCEMANAGER - AppID: " <<applicationId << ")" << std::endl; break;
-		case 3: std::cout <<   "Step8: Allocate Resources for a Mapper (AppID: " <<applicationId << ")" << std::endl; break;
-		case 4: std::cout <<   "Step8: Allocate Resources for a Reducer (AppID: " <<applicationId << ")" << std::endl; break;
-		default: std::cout <<  "in RESOURCEMANAGER - UNRECOGNIZED Event Behavior" << std::endl; break;
+		case 1: std::cout <<   "[INFO] Step2: Get Application ID (in RESOURCEMANAGER - AppID: " <<applicationId << ")" << std::endl; break;
+		case 2: std::cout <<   "[INFO] Step4: Submit Application (in RESOURCEMANAGER - AppID: " <<applicationId << ")" << std::endl; break;
+		case 3: std::cout <<   "[INFO] Step8: Allocate Resources for a Mapper (AppID: " <<applicationId << ")" << std::endl; break;
+		case 4: std::cout <<   "[INFO] Step8: Allocate Resources for a Reducer (AppID: " <<applicationId << ")" << std::endl; break;
+		default: std::cout <<  "[INFO] in RESOURCEMANAGER - UNRECOGNIZED Event Behavior" << std::endl; break;
 		}
 	}
 	else if(nodeType == NODEMANAGER){
 		switch(eventBehavior){
-		case 1: std::cout <<   "Step5a: Start Container (AppID: " <<applicationId << ")" << std::endl; break;
-		case 2: std::cout <<   "Step5b: Launch Application Master's Process (AppID: " <<applicationId << ")" << std::endl; break;
-		case 3: std::cout <<   "Step6: Initialize Application (AppID: " <<applicationId << ")" << std::endl; break;
-		case 4: std::cout <<   "Step7: Retrieve Input Splits (AppID: " <<applicationId << ")" << std::endl; break;
-		case 5: std::cout <<   "UBER TASK Execution Initiated (AppID: " <<applicationId << ")" << std::endl; break;
-		case 6: std::cout <<   "Step9a: Start Container for mapper (AppID: " <<applicationId << ")" << std::endl; break;
-		case 7: std::cout <<   "Step9a: Start Container for reducer(AppID: " <<applicationId << ")" << std::endl; break;
-		case 8: std::cout <<   "Step9b: Launch (AppID: " <<applicationId << ")" << std::endl; break;
-		case 9: std::cout <<   "Step10: Retrieve Application Resources (AppID: " <<applicationId << ")" << std::endl; break;
-		case 10: std::cout <<   "Step11: Run (AppID: " <<applicationId << ")" << std::endl; break;
-		case 13: std::cout <<   "Transfer request is sent to file split location (AppID: " <<applicationId << ")" << std::endl; break;
-		default: std::cout <<  "in NODEMANAGER - UNRECOGNIZED Event Behavior" << std::endl; break;
+		case 1: std::cout <<   "[INFO] Step5a: Start Container (AppID: " <<applicationId << ")" << std::endl; break;
+		case 2: std::cout <<   "[INFO] Step5b: Launch Application Master's Process (AppID: " <<applicationId << ")" << std::endl; break;
+		case 3: std::cout <<   "[INFO] Step6: Initialize Application (AppID: " <<applicationId << ")" << std::endl; break;
+		case 4: std::cout <<   "[INFO] Step7: Retrieve Input Splits (AppID: " <<applicationId << ")" << std::endl; break;
+		case 5: std::cout <<   "[INFO] UBER TASK Execution Initiated (AppID: " <<applicationId << ")" << std::endl; break;
+		case 6: std::cout <<   "[INFO] Step9a: Start Container for mapper (AppID: " <<applicationId << ")" << std::endl; break;
+		case 7: std::cout <<   "[INFO] Step9a: Start Container for reducer(AppID: " <<applicationId << ")" << std::endl; break;
+		case 8: std::cout <<   "[INFO] Step9b: Launch (AppID: " <<applicationId << ")" << std::endl; break;
+		case 9: std::cout <<   "[INFO] Step10: Retrieve Application Resources (AppID: " <<applicationId << ")" << std::endl; break;
+		case 10: std::cout <<  "[INFO] Step11: Run (AppID: " <<applicationId << ")" << std::endl; break;
+		case 13: std::cout <<  "[INFO] Transfer request is sent to file split location (AppID: " <<applicationId << ")" << std::endl; break;
+		default: std::cout <<  "[INFO] in NODEMANAGER - UNRECOGNIZED Event Behavior" << std::endl; break;
 		}
 	}
 	else{
-		std::cout <<  "UNRECOGNIZED node type" << std::endl;
+		std::cout <<  "[INFO] UNRECOGNIZED node type" << std::endl;
 	}
 	#endif
 

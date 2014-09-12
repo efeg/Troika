@@ -26,7 +26,6 @@
 #ifndef CPU_H_
 #define CPU_H_
 
-#include <queue>
 #include <memory>
 #include <map>
 #include "EventTimeCompare.h"
@@ -34,6 +33,8 @@
 #define NON_SPILL -1
 #define SPILL 0
 #define EXP_CPU_DELAY_CONSTANT 3	// the delay constant: increase to lower the exponential delay (if selected delay type is exponential)
+
+extern std::priority_queue<Event, std::vector<Event>, EventTimeCompare > eventsList;
 
 struct mapRecordState{
 	size_t applicationId_;
@@ -51,14 +52,12 @@ struct mapState{
 	int fsID_;
 	double startTime_;
 	double finishTime_;
-	size_t remainingData_;	// still needs to be processed in mapper
-	size_t toBeSentToSort_;	// processed in mapper but waiting for spilling of previos part of filesplit to continue building a full spill for sort function
+	size_t remainingData_;	// still needs to be processed in map function
+	size_t toBeSentToSort_;	// processed in map function but waiting for spilling of previous part of filesplit to continue building a full spill for sort function
 	int state_;
 	Event suspendedEvent_;
 	bool isSuspended_;
 };
-
-extern std::priority_queue<Event, std::vector<Event>, EventTimeCompare > eventsList;
 
 class Cpu {
 public:
@@ -68,97 +67,74 @@ public:
 
 	void work (int, size_t, int, Event*, size_t, size_t, double);
 
-	void sortWork (size_t, int, Event*, double, bool hasCombiner=false); // returns completion time of sort (which is the starting time for spill)
+	void sortWork (Event*, double, bool hasCombiner=false); // returns completion time of sort (which is the starting time for spill)
 
 	void combinerWork (size_t resourceQuantity, int seized_mapCpuVcores, Event* ev, double taskIntensity);
 
-	void mergeWork (size_t, int, Event*, double);
+	void mergeWork (Event*, double);
 
 	int getRemainingNumberOfCores() const;
 
 	void setRemainingNumberOfCores(int remainingNumberOfCores);
 
-	size_t getRemainingCapacity() const;
-
 	void remainingMapWork(size_t resourceQuantity, int seized_mapCpuVcores, Event* ev, size_t mapreduceTaskIO, size_t spillSize, double taskIntensity);
 
 	void setMapFinish(size_t appID, int fsID, double finishTime);
 
-	void addToBeSentToSort(size_t appID, int fsID, size_t toBeSentToSort);
-
-	size_t gettoBeSentToSort_(size_t appID, int fsID) const;
-
-	void setstate_(size_t appID, int fsID, int state);
-
-	void setsuspendedEvent_(size_t appID, int fsID, Event ev);
-
-	void resetToBeSentToSort(size_t appID, int fsID);
-
-	int getstate_(size_t appID, int fsID) const;
-
-	bool getisSuspended_(size_t appID, int fsID) const;
-
-	Event updateTime_getsuspendedEvent_(size_t appID, int fsID, double eventTime);
-
 	void reduceMergeWork (size_t resourceQuantity, int seized_mapCpuVcores, Event* ev, double taskIntensity);
 
-	void reduceSort(size_t resourceQuantity, int seized_mapCpuVcores, Event* ev, double taskIntensity);
+	void reduceSort(int seized_mapCpuVcores, Event* ev, double taskIntensity);
 
 	void reduceFunctionWork (size_t resourceQuantity, int seized_mapCpuVcores, Event* ev, double taskIntensity);
 
 	void mapFunction(Event* ev, size_t spillLimitInBytes, size_t suspendLimitInBytes, int cpuVcores, double mapIntensity, int totalRecCount);
 
-	bool mapSpillCompleted(int fsId, size_t completedSize, Event*ev);
+	bool mapSpillCompleted(Event*ev);
 
 	void nonSpillComplete(int fsId, size_t completedSize, Event *ev);
 
-	int incCpuUserCount(int fsId);
+	int incCpuUserCount(int fsId, int appID);
 
-	void decCpuUserCount(int fsId);
+	void decCpuUserCount(int fsId, int appID);
 
-	int getCpuUserCount(int fsId);
+	int increduceCpuUserCount(int redId, int appID);
 
-	double getProcessingSpeed(int cpuVcores, int fsId, double mapIntensity);
-
-	double getreduceProcessingSpeed(int cpuVcores, int redId, double taskIntensity);
-
-	int increduceCpuUserCount(int redId);
-
-	void decreduceCpuUserCount(int redId);
-
-	int getreduceCpuUserCount(int redId);
+	void decreduceCpuUserCount(int redId, int appID);
 
 	void setEffectiveMapCoreCapacity(double capacityLimitor);
 
-	double getEffectiveMapCoreCapacity();
-
 private:
 	int remainingNumberOfCores_;
-	const size_t capacityPerCore_;	// this is (speed) per core!! (bytes/sec)
+	const size_t capacityPerCore_;	// (speed) per core!! (bytes/sec)
 	enum DistributionType delayType_;
 	enum TimeType unit_;
 	double delayratio_;
 	size_t spillLimitInBytes_, suspendLimitInBytes_;
 	int cpuVcores_;
-	double mapIntensity_;
 	double effectiveMapCoreCapacity_;
-	double delay (size_t, Event, double, int, int, size_t remainingMapIntermediateOutputSize, size_t mapreduceTaskIO=0, double taskIntensity=1.0);
 	std::vector<mapState> mapState_;
+	std::map<std::pair<int,int>, int> fsId_state_;		// Either [SUSPENDED | SPILL_INPROGRESS | NO_SPILL_INPROGRESS]
+	std::map<std::pair<int,int>, size_t>  fsId_usedBufferBytes, fsId_processedBufferBytes;	// Initially all buffer is empty for each map task
+	std::map<std::pair<int,int>, bool> isActiveSpill;										// Initially no active spill
+	std::map<std::pair<int,int>, std::queue<mapRecordState>> waitingMapRecords_;
+	std::map<std::pair<int,int>, int> fsId_processedRecordCount, fsId_totalRecordCount;
+	std::map<std::pair<int,int>, int> fsId_cpuUserCount_, redId_cpuUserCount_;	// CPU user thread count in map phase (per map task)
+	std::map<int, double> mapIntensity_;
+
+	int opEventMap(int op);
+	size_t gettoBeSentToSort_(size_t appID, int fsID) const;
+	int getstate_(size_t appID, int fsID) const;
+	void setstate_(size_t appID, int fsID, int state);
+	double getProcessingSpeed(int cpuVcores, int fsId, double mapIntensity, int appID);
+	double getreduceProcessingSpeed(int cpuVcores, int redId, double taskIntensity, int appID);
+	int  getMapFunctionState(int fsId, int appID, int totalRecCount, size_t spillLimitInBytes, size_t suspendLimitInBytes, int cpuVcores, double mapIntensity);
+	bool isLastRecord(int fsId, int appID);
+	double delay (size_t, Event, double, int, int, size_t remainingMapIntermediateOutputSize, size_t mapreduceTaskIO=0, double taskIntensity=1.0);
 	void delayHelper(double newEventTime, size_t resourceQuantity, Event ev, int op, int seized_mapCpuVcores,
 	size_t remainingMapIntermediateOutputSize, size_t mapreduceTaskIO, double taskIntensity);
-	int opEventMap(int op);
-	std::map<int, int> fsId_state_;						// Either [SUSPENDED | SPILL_INPROGRESS | NO_SPILL_INPROGRESS]
-	std::map<int, size_t> fsId_usedBufferBytes;			// Initially all buffer is empty for each map task
-	std::map<int, size_t> fsId_processedBufferBytes;	// Initially all buffer is empty for each map task
-	std::map<int, bool> isActiveSpill;					// Initially no active spill
-	int  getMapFunctionState(int fsId, int totalRecCount, size_t spillLimitInBytes, size_t suspendLimitInBytes, int cpuVcores, double mapIntensity);
-	bool isLastRecord(int fsId);
-	std::map<int, std::queue<mapRecordState>> waitingMapRecords_;
-	std::map<int, int> fsId_processedRecordCount;	// Initially 0
-	std::map<int, int> fsId_totalRecordCount;		// Total record count per filesplit
-	std::map<int, int> fsId_cpuUserCount_;			// CPU user thread count in map phase (per map task)
-	std::map<int, int> redId_cpuUserCount_;
-
+	void resetToBeSentToSort(size_t appID, int fsID);
+	void setsuspendedEvent_(size_t appID, int fsID, Event ev);
+	void addToBeSentToSort(size_t appID, int fsID, size_t toBeSentToSort);
 };
 
 #endif /* CPU_H_ */
