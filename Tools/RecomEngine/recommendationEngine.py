@@ -28,11 +28,13 @@ from threading import Lock, Semaphore
 import re, os, time, sys
 import argparse
 import collections
-from numpy import asmatrix, ones, matrix, array, linalg
+from numpy import asmatrix, ones, matrix, array, linalg, set_printoptions, nan
 import time
 
-# python recommendationEngine.py greedyBundleOptimizer.txt -b 50000 -l 1
-# greedyBundleOptimizer.txt contains a list of bundles in the following example format:
+set_printoptions(threshold=nan)
+
+# python recommendationEngine.py bundles.txt -b 50000 -l 1
+# bundles.txt contains a list of bundles in the following example format:
 # bundle M1.large rangeres reducers 1 2 1 res mem 10737418240 res cores 2 res corespeed 840000000 res maxreadspeed 326548619 res maxwritespeed 326548619 res minreadspeed 98786585 res minwritespeed 98786585 res netspeed 125000000 nodecost 2000 linkcost 0 repeat 2
 
 # if -z parameter is provided as input, then the program runs using multi-dimensional optimization
@@ -92,7 +94,7 @@ reduceIntensity.*:\t\t\t\treduceIntensity\n\
 reduceSortIntensity.*:\t\t\t\treduceSortIntensity\n\
 combinerIntensity.*:\t\t\t\tcombinerIntensity\n\
 queueIDs.*:\t\t\t\tCapacityScheduler queueIDs for applications\n\
-schQueues.*:\t\t\t\tnumber and corresponding capacity of queues\n\
+schQueues.*:\t\t\t\tCorresponding capacity of queues\n\
 ")
 
         # required argument
@@ -102,9 +104,10 @@ schQueues.*:\t\t\t\tnumber and corresponding capacity of queues\n\
         self.parser.add_argument("-e", "--executablePath",      help="Path to TROIKA's executable",           default="../../Debug/Troika")
         self.parser.add_argument("-b", "--budget",              help="The total cluster budget limit", type=long, default=50000)
         self.parser.add_argument("-z", "--testTolerance",       help="Tolerance percentage to worse performance", type=float)
-        self.parser.add_argument("-l", "--loglevel",            help="Log level [0: none, 1: regular, 2: all]", type=int, default=1)
+        self.parser.add_argument("-l", "--loglevel",            help="Log level [0: none, 1: regular, 2: all, 3: debug]", type=int, default=1)
         self.parser.add_argument("-s", "--samplesize",          help="Samples per parameter(try to provide 1:20 ratio)", type=int, default=5)
         self.parser.add_argument("-f", "--finaltestcount",      help="Systems to be tested after fitting a model", type=int, default=3)
+        self.parser.add_argument("-o", "--rsmModelOrder",       help="[1: first order model, 2: second order model]", type=int, default=2)
 
         self.args = self.parser.parse_args()
         # start analysis for shortest time 
@@ -132,6 +135,7 @@ schQueues.*:\t\t\t\tnumber and corresponding capacity of queues\n\
         self.simID_clusterCost = {}
         self.DEFAULT_SIMCOUNT = 5
         self.SAMPLES_PER_PARAM = self.args.samplesize
+        self.RSM_MODEL = self.args.rsmModelOrder
         # how many systems will be tested after fitting a model and finding the expected best configs?
         self.FINAL_TEST_COUNT = self.args.finaltestcount
 
@@ -145,7 +149,7 @@ schQueues.*:\t\t\t\tnumber and corresponding capacity of queues\n\
         self._systemsToBeTested = []
         self.sortedSystems = []
 
-        # read file to count apps
+        # read file to count applications
         TROIKAInput = open(self.args.TROIKAInputFileName,"r")
         self.appCount = 0
         for line in TROIKAInput:
@@ -278,7 +282,26 @@ schQueues.*:\t\t\t\tnumber and corresponding capacity of queues\n\
 
         return sortedSystems
 
-    # eliminate systems with insufficient memory, higher cost than the limit
+    def checkSampleInufficiency(self):
+
+        if self.args.loglevel > 2:
+            print "[LOG]: self.numberOfConfig: " +  str(self.numberOfConfigs)
+            print "[LOG]: self.numberOfLists: " + str(self.numberOfLists)
+            print "[LOG]: self.SAMPLES_PER_PARAM: " + str(self.SAMPLES_PER_PARAM)
+
+        # first order RSM model
+        if self.RSM_MODEL == 1 and (self.numberOfConfigs < self.numberOfLists*self.SAMPLES_PER_PARAM):
+            print "Number of Alternatives: " + str(self.numberOfConfigs) + " required Samples: " + str(self.numberOfLists*self.SAMPLES_PER_PARAM)
+            return True     # Insufficient number of configs!
+
+        # second order RSM model
+        elif self.RSM_MODEL == 2 and (self.numberOfConfigs < ((self.numberOfLists*(self.numberOfLists+3))/2)*self.SAMPLES_PER_PARAM):
+            print "Number of Alternatives: " + str(self.numberOfConfigs) + " required Samples: " + str(((self.numberOfLists*(self.numberOfLists+3))/2)*self.SAMPLES_PER_PARAM)
+            return True     # Insufficient number of configs!
+
+        return False
+
+    # eliminate systems with insufficient memory and the ones having higher cost than the budget
     # returns number of configs in the new list
     def eliminate(self):
         # insufficient memory and budget satisfiability check
@@ -331,9 +354,8 @@ schQueues.*:\t\t\t\tnumber and corresponding capacity of queues\n\
 
         # sanity check for RSM compliance (if either RSM was not intended to be used or if there is 
         # insufficient number of available bundles, then use multi-dimensional optimization)
-        if self.useRSM and (self.numberOfConfigs < self.numberOfLists*self.SAMPLES_PER_PARAM):
+        if self.useRSM and self.checkSampleInufficiency():
             print "Sample size is less than user's request after the pruning. RSM cannot be used. Fallback to multidimensional optimization."
-            print "Number of Alternatives: " + str(self.numberOfConfigs) + " required Samples: " + str(self.numberOfLists*self.SAMPLES_PER_PARAM)
             self.useRSM = False
 
         if not self.useRSM:
@@ -566,19 +588,28 @@ schQueues.*:\t\t\t\tnumber and corresponding capacity of queues\n\
 
     def outofToleranceLimit(self, toBeWritten):
 
-        print self.args.testTolerance
+        if self.args.loglevel > 1:
+            print "[LOG]: Tolerance: " + str(self.args.testTolerance)
 
         if float(toBeWritten.split(None, 2)[1]) > float(self.bestPerformance.split(None, 2)[1]) * (1+self.args.testTolerance):
             return True
         return False
 
-    def getMaxMinResList(self):
+    def getMaxMinResList(self, order):
+
         maxList = [0.0] * self.numberOfLists
         minList = [sys.float_info.max] * self.numberOfLists
         rowID = 0
         colID = 0
+        numberOfOnes = -1
 
-        resMatrix = asmatrix(ones((self.numberOfLists*self.SAMPLES_PER_PARAM,self.numberOfLists)))
+        if order == 1:
+            numberOfOnes = self.numberOfLists*self.SAMPLES_PER_PARAM
+
+        elif order == 2:
+            numberOfOnes = ((self.numberOfLists*(self.numberOfLists+3))/2)*self.SAMPLES_PER_PARAM
+
+        resMatrix = asmatrix(ones((numberOfOnes,self.numberOfLists)))
 
         for system in self._systemsToBeTested:
             lisOfWords = system.split()
@@ -620,40 +651,83 @@ schQueues.*:\t\t\t\tnumber and corresponding capacity of queues\n\
 
                 index += 1
 
-            if rowID == self.numberOfLists*self.SAMPLES_PER_PARAM -1:
+            if rowID == numberOfOnes -1:
                 break
 
             rowID += 1
             colID = 0
-
 
         for index in xrange(len(minList)):
             if maxList[index] == minList[index] :
                 print "[LOG]: Parameter value " + str(maxList[index]) + " is the same for the specific parameter"
                 sys.exit('Make sure that samples contain at least one different value for each parameter!')
 
+
         return maxList, minList, resMatrix
 
     # returns the X matrix upon calculating coding scheme
-    def calculateCodingScheme(self):
+    def calculateCodingScheme(self, order):
 
-        maxRes, minRes, resMatrix = self.getMaxMinResList()
-        # create x matrix
-        # number of rows = self.numberOfLists*self.SAMPLES_PER_PARAM
-        # number of columns = number of res + 1 = self.numberOfLists + 1
-        X_matrix = asmatrix(ones((self.numberOfLists*self.SAMPLES_PER_PARAM,self.numberOfLists +1)))
+        maxRes, minRes, resMatrix = self.getMaxMinResList(order)
+        numberOfRows = -1
+        numberOfCols = -1
 
-        for rID in xrange(self.numberOfLists*self.SAMPLES_PER_PARAM):
-            for cID in xrange(1, self.numberOfLists + 1):
+        if order == 1:
+            numberOfRows = self.numberOfLists*self.SAMPLES_PER_PARAM
+            numberOfCols = self.numberOfLists+1
+
+        elif order == 2:
+            numberOfRows = ((self.numberOfLists*(self.numberOfLists+3))/2)*self.SAMPLES_PER_PARAM
+            numberOfCols = ((self.numberOfLists*(self.numberOfLists+3))/2)+1
+
+        # create X matrix
+        X_matrix = asmatrix(ones((numberOfRows,numberOfCols)))
+
+        for rID in xrange(numberOfRows):
+            for cID in xrange(1, self.numberOfLists+1):
                 X_matrix[rID, cID] = (resMatrix[rID, cID-1]-((maxRes[cID-1]+minRes[cID-1])/2.0))/((maxRes[cID-1]-minRes[cID-1])/2.0)
+        
+        # set the remaining parts of the X_matrix for 2nd order RSM model with interaction
+        if order == 2:
+
+            # squares in the formula
+            for rID in xrange(numberOfRows):
+                for cID in xrange(self.numberOfLists+1, 2*self.numberOfLists+1):
+                    X_matrix[rID, cID] = X_matrix[rID, cID-self.numberOfLists]*X_matrix[rID, cID-self.numberOfLists]
+
+            # multiplications among different terms
+            for rID in xrange(numberOfRows):
+                # the first term is interacting with k-1 terms
+                interactingTermCount = self.numberOfLists-1
+                head = self.numberOfLists-interactingTermCount
+                interactingOrder = head+1
+
+                for cID in xrange(2*self.numberOfLists+1, numberOfCols):
+                    # calculate the value
+                    X_matrix[rID, cID] = X_matrix[rID, head]*X_matrix[rID, interactingOrder]
+
+                    if interactingOrder == self.numberOfLists:
+                        interactingTermCount-=1
+                        head = self.numberOfLists-interactingTermCount
+                        interactingOrder = head+1
+                    else:
+                        interactingOrder += 1
+
+
         return maxRes, minRes, X_matrix
 
-    def generateYmatrix(self):
+    def generateYmatrix(self, order):
+
+        if order == 1:
+            numberOfRows = self.numberOfLists*self.SAMPLES_PER_PARAM
+
+        elif order == 2:
+            numberOfRows = ((self.numberOfLists*(self.numberOfLists+3))/2)*self.SAMPLES_PER_PARAM
 
         # this matrix will keep the sample results gathered from simulation
-        y_matrix = asmatrix(ones((self.numberOfLists*self.SAMPLES_PER_PARAM,1)))
+        y_matrix = asmatrix(ones((numberOfRows,1)))
 
-        for sysID in xrange(self.numberOfLists*self.SAMPLES_PER_PARAM):
+        for sysID in xrange(numberOfRows):
             if self.args.loglevel > 0:
                 print("[LOG]: Start simulation for simID: " + str(self._systemsToBeTested[sysID].split(None, 2)[1]))
 
@@ -684,20 +758,88 @@ schQueues.*:\t\t\t\tnumber and corresponding capacity of queues\n\
     def getb_matrix(self, Xprime_X, Xprime_y):
         return Xprime_X.I*Xprime_y
 
+    def getRowColID(self, coef, k):
+
+        posInTriangle = coef - 2*k
+        coefRowID = k-1
+        coefColID = 0
+        value = 1
+        addMe = k-1
+        for i in xrange(k-1):
+            value += addMe
+            if posInTriangle < value:
+                value -= addMe
+                coefRowID = i+1
+                break
+            addMe -=1
+        coefColID = posInTriangle-value+1
+        return coefRowID, coefColID
+
     def get_decoded_b_matrix(self, b_matrix, maxRes, minRes):
 
         decoded_b_matrix = asmatrix(ones((len(b_matrix),1)))
+        decoded_b_matrix[0,0] = b_matrix[0,0]
 
-        decoded_b_matrix[0,0] = b_matrix[0,0] 
+        if self.RSM_MODEL == 1:
+            for row in xrange(1, len(b_matrix)):
+                decoded_b_matrix[0,0] -= ((maxRes[row-1]+minRes[row-1])/(maxRes[row-1]-minRes[row-1]))*b_matrix[row,0]
+                decoded_b_matrix[row,0] = b_matrix[row,0] / ((maxRes[row-1]-minRes[row-1])/2.0)
 
-        for row in xrange(1, len(b_matrix)):
-            decoded_b_matrix[0,0] -= ((maxRes[row-1]+minRes[row-1])/(maxRes[row-1]-minRes[row-1]))*b_matrix[row,0]
-            decoded_b_matrix[row,0] = b_matrix[row,0] / ((maxRes[row-1]-minRes[row-1])/2.0)
+        else:
+            # four-phase setting process. 
+            # set constant term and first order terms in the first phase (partially)
+            # continue setting their values in the second phase
+
+            # init phase
+            mL = [0.0] * len(maxRes)
+            nL = [0.0] * len(maxRes)
+
+            for row in xrange(1, len(maxRes)+1):
+                mL[row-1] = (maxRes[row-1]+minRes[row-1])
+                nL[row-1] = (maxRes[row-1]-minRes[row-1])
+
+            # first phase
+            for row in xrange(1, len(maxRes)+1):
+                decoded_b_matrix[0,0] -= (mL[row-1]/nL[row-1])*b_matrix[row,0]
+                decoded_b_matrix[row,0] = b_matrix[row,0] / (nL[row-1]/2.0)
+
+            # second phase
+            for row in xrange(len(maxRes)+1, 2*len(maxRes)+1):
+                decoded_b_matrix[0,0] += (mL[row-1-len(maxRes)]/nL[row-1-len(maxRes)]) * (mL[row-1-len(maxRes)]/nL[row-1-len(maxRes)]) *b_matrix[row,0]
+                decoded_b_matrix[row-len(maxRes),0] -= 4*b_matrix[row,0] * mL[row-1-len(maxRes)] / (nL[row-1-len(maxRes)] * nL[row-1-len(maxRes)])
+                decoded_b_matrix[row,0] = 4*b_matrix[row,0] / (nL[row-1-len(maxRes)] * nL[row-1-len(maxRes)])
+
+            # third phase
+            for row in xrange(2*len(maxRes)+1, len(b_matrix)):
+                coefRowID, coefColID = self.getRowColID(row, len(maxRes))
+                decoded_b_matrix[0,0] += b_matrix[row,0] * ((mL[coefRowID-1] * mL[coefRowID + coefColID-1]) / (nL[coefRowID-1] * nL[coefRowID + coefColID-1]))
+                decoded_b_matrix[row,0] = 4*b_matrix[row,0] / (nL[coefRowID-1] * nL[coefRowID + coefColID-1])
+
+            # fourth phase (first order regulars remaining calculations)
+            for index in xrange(1, len(maxRes)+1):
+                for coef in xrange(2*len(maxRes)+1, len(b_matrix)):
+                    # get the row and column id of the index of coefficient.
+                    # this function is needed to determine the positions for
+                    # generating coefficients of first-order terms.
+                    # len(maxRes) represents the number of parameters
+                    coefRowID, coefColID = self.getRowColID(coef, len(maxRes))
+
+                    # check that the order is 
+                    if (coefRowID == index) or (coefRowID + coefColID == index):
+                        decoded_b_matrix[index,0] -= 2*b_matrix[coef,0]* ( mL[coefRowID + coefColID-1] /(nL[coefRowID-1] * nL[coefRowID + coefColID-1]) )
 
         return decoded_b_matrix
 
     def get_sysResMatrix(self):
-        sysResMatrix = asmatrix(ones((self.numberOfConfigs,self.numberOfLists +1)))
+
+        numCols = 0
+
+        if self.RSM_MODEL == 1:
+            numCols = self.numberOfLists +1
+        else:
+            numCols = ((self.numberOfLists*(self.numberOfLists+3))/2) +1
+
+        sysResMatrix = asmatrix(ones((self.numberOfConfigs,numCols)))
 
         rowID = 0
         colID = 0
@@ -729,6 +871,32 @@ schQueues.*:\t\t\t\tnumber and corresponding capacity of queues\n\
 
             rowID += 1
             colID = 0
+
+        # if second order then calculate the remaining parts
+        if self.RSM_MODEL == 2:
+
+            # squares in the formula
+            for rID in xrange(self.numberOfConfigs):
+                for cID in xrange(self.numberOfLists+1, 2*self.numberOfLists+1):
+                    sysResMatrix[rID, cID] = sysResMatrix[rID, cID-self.numberOfLists]*sysResMatrix[rID, cID-self.numberOfLists]
+
+            # multiplications among different terms
+            for rID in xrange(self.numberOfConfigs):
+                # the first term is interacting with k-1 terms
+                interactingTermCount = self.numberOfLists-1
+                head = self.numberOfLists-interactingTermCount
+                interactingOrder = head+1
+
+                for cID in xrange(2*self.numberOfLists+1, numCols):
+                    # calculate the value
+                    sysResMatrix[rID, cID] = sysResMatrix[rID, head]*sysResMatrix[rID, interactingOrder]
+
+                    if interactingOrder == self.numberOfLists:
+                        interactingTermCount-=1
+                        head = self.numberOfLists-interactingTermCount
+                        interactingOrder = head+1
+                    else:
+                        interactingOrder += 1
 
         return sysResMatrix
 
@@ -774,23 +942,32 @@ schQueues.*:\t\t\t\tnumber and corresponding capacity of queues\n\
                             break
             else:
                 # calculate coding scheme to map all the variable values between [-1, 1] and generate X_matrix
-                maxRes, minRes, X_matrix = self.calculateCodingScheme()
+                maxRes, minRes, X_matrix = self.calculateCodingScheme(self.RSM_MODEL)
+
+                if self.args.loglevel > 2:
+                    print "[LOG]: maxRes " + str(maxRes)
+                    print "-------------------------"
+                    print "[LOG]: minRes " + str(minRes)
+                    print "-------------------------"
+                    print "[LOG]: X_matrix " + str(X_matrix)
+                    print "-------------------------"
 
                 # calculate X'X
                 Xprime_X = self.getXprime_X(X_matrix)
-
                 # singularity check
                 if linalg.det(Xprime_X) == 0:
                     self.useRSM = False
+                    
+                    if self.args.loglevel > 2:
+                        print "[LOG]: Xprime_X " + str(Xprime_X)
+
                     # create sorted list for each non-range res
                     self.sortedSystems = self.createSortedLists()
                     print "Matrix is singular. RSM cannot be used. Fallback to multidimensional optimization."
                 else:
                     optimizerIsSelected = True
-
                     # generate y matrix
-                    y_matrix = self.generateYmatrix()
-
+                    y_matrix = self.generateYmatrix(self.RSM_MODEL)
                     # calculate X'y
                     Xprime_y = self.getXprime_y(X_matrix, y_matrix)
 
@@ -805,7 +982,6 @@ schQueues.*:\t\t\t\tnumber and corresponding capacity of queues\n\
 
                     # convert matrix to a list
                     y_head_list = array(y_head_matrix.T)[0].tolist()
-
                     # sort systems based on y head
                     sortedSys = self.getSortedSystems(y_head_list)
 
@@ -1032,13 +1208,13 @@ schQueues.*:\t\t\t\tnumber and corresponding capacity of queues\n\
 
 try:
     start_time = time.time()
-    greedy = RecommendationEngine()
-    numberOfConfigs = greedy.eliminate()
-    bestPerf, bestCmd = greedy.tester()
+    myRecommender = RecommendationEngine()
+    numberOfConfigs = myRecommender.eliminate()
+    bestPerf, bestCmd = myRecommender.tester()
 
     print "Recommendation Generation Time: " + str(time.time() - start_time) + " seconds"
 
-    greedy.presentResult()
+    myRecommender.presentResult()
 except IOError, e:
     print "[LOG]: Interrupted..."
     sys.exit()

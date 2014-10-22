@@ -32,7 +32,7 @@ class ConfigDiscovery:
     def __init__(self):
         self.hadoop_home = os.environ["HADOOP_HOME"]
         self.PORT_NUMBER = 5000
-        self.DEBUG = False
+        self.DEBUG = True
         self.local_rack_sum = 0
         self.tor2aggr = 0
 
@@ -244,7 +244,7 @@ ___________________INPUT___________________________________________\n\n# Please 
         # Write SCHEDULER and SWITCHES
         with open(self.hadoop_home+"/TroikaConf/input.txt", "a") as myfile:
             myfile.write("# SCHEDULER\nscheduler 1 100\n\n# For each TOR Switch add the event id of each end.\n\n# TOR SWITCH (RACK_i)\nswitch *ID* *upEndpointID*\n\n\
-# There is a single aggregation switch: add its event id.\n# AGGREGATION SWITCH (INTER RACK)\nswitch *expectedEventID*\n\n")
+# There is a single aggregation switch: add its event id.\n# AGGREGATION SWITCH (INTER RACK)\nswitch *ID*\n\n")
 
 
         # Get mapreduceJobReduces and applicationSize from self.hadoop_home+ "/TroikaConf/config_Troika_" + host+ ".txt" (any host)

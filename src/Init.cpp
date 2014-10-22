@@ -743,7 +743,7 @@ void Init::initDES(double *endingCondition, int argc, char* argv[], vector<std::
 		    ("reduceSortIntensity", po::value<double>()->default_value(-1.0),	"set Reduce Sort Intensity")
 		    ("combinerIntensity", po::value<double>()->default_value(-1.0),	"set Combiner Intensity")
 		    ("queueIDs", po::value<std::vector<size_t> >()->multitoken(),	"set CapacityScheduler queueIDs for applications")
-		    ("schQueues", po::value<std::vector<double> >()->multitoken(),	"set number and corresponding capacity of queues")
+		    ("schQueues", po::value<std::vector<double> >()->multitoken(),	"set corresponding capacity of queues")
 		;
 
 		try{
@@ -808,7 +808,7 @@ void Init::initDES(double *endingCondition, int argc, char* argv[], vector<std::
 			}
 			if(vm["reducerCount"].as<int>() != -1){	// reducer count is typed in command line
 				// do not print to terminal...
-				terminal_output_disabled = true;
+				//terminal_output_disabled = true;
 				initUserModules(vm["input"].as<string>(), eventExpectingModules, applications, vm["reducerCount"].as<int>());
 			}
 			else{
