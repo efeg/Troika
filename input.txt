@@ -39,6 +39,7 @@
 # E.g. *finalOutputPercent* might be replaced with 99
 # Remove the optional arguments that you would like to use the default values
 # Make sure that the parameter order is preserved and no undefined *value* remains in the final input.txt
+# Bayes -- 40K
 
 # SCHEDULER
 scheduler 1 100
@@ -56,11 +57,12 @@ switch 5
 # CONFIGURATION
 config 1
 
-# FILESPLIT LOCATIONS (in terms of expected node event type) -- TeraSort App
-filesplit 0 0 30 7 7 7 7 7 7 7 7 7 7 7 7 7 7 7 7 7 7 7 7 7 7 7 7 7 7 7 7 7 7
+# FILESPLIT LOCATIONS (in terms of expected node event type) -- PageRank App
+filesplit 1 0 96 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3
 
 # APPLICATION
-application 4016539740 0 0.32 0.3 2 2 0.00259626461 2.07422324511 0.00005385232 1 3 0
+#application 4016539740 0 0.835 1 1 1 0.00259626461 2.43862677407 0.0000633132 1 3 0
+application 147251843 0 0.5 0.5 120 120 5416.06050638 2.981694854 91.8305613329 1 3 0 65536 1 12 56.8644097772
 
 # LINK (TOR to AGGR)
 link 10 118390264.283 5 2

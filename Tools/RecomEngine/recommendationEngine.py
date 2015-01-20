@@ -108,6 +108,7 @@ schQueues.*:\t\t\t\tCorresponding capacity of queues\n\
         self.parser.add_argument("-s", "--samplesize",          help="Samples per parameter(try to provide 1:20 ratio)", type=int, default=5)
         self.parser.add_argument("-f", "--finaltestcount",      help="Systems to be tested after fitting a model", type=int, default=3)
         self.parser.add_argument("-o", "--rsmModelOrder",       help="[1: first order model, 2: second order model]", type=int, default=2)
+        self.parser.add_argument("-d", "--debugMode",           help="[0: deactivate 1: activate]", type=int, default=0)
 
         self.args = self.parser.parse_args()
         # start analysis for shortest time 
@@ -133,7 +134,13 @@ schQueues.*:\t\t\t\tCorresponding capacity of queues\n\
         self.resultCache = {}
         # a mapping for simId --> cluster cost
         self.simID_clusterCost = {}
+
+        # a mapping for presenting parameter values
+        self.paramFlag_value = {}
+
         self.DEFAULT_SIMCOUNT = 5
+        # default value of yarn.nodemanager.resource.memory-mb (as of version 2.2.0 and 2.3.0)
+        self.DEFAULT_RESOURCEMEMSIZE = 8192
         self.SAMPLES_PER_PARAM = self.args.samplesize
         self.RSM_MODEL = self.args.rsmModelOrder
         # how many systems will be tested after fitting a model and finding the expected best configs?
@@ -142,12 +149,90 @@ schQueues.*:\t\t\t\tCorresponding capacity of queues\n\
         # the best perf result and corresponding configuration result found so far
         self.bestPerformance = "0 " + str(sys.float_info.max) + " 0 0 0 0"
         self.bestCommand = ""
-        self.numberOfLists = 0
-        self.numberOfConfigs = 0
+        self.numberOfResources = 0
+        self.numberOfBundles = 0
 
         # contains the systems to be tested (the list is populated in "eliminate" fn)
         self._systemsToBeTested = []
         self.sortedSystems = []
+
+        # options that are equal to certain string
+        self.options_equal_list = [('cores', '-c')]
+        self.options_equal_dict = {key: value for key, value in self.options_equal_list}
+
+        # options that start with certain string
+        self.options_startswith_list = [('coresp', ' -s'),
+                         ('nets', '-l'),
+                         ('maxr', '-v'),
+                         ('maxw', '-w'),
+                         ('minr', '-x'),
+                         ('minw', '-y'),
+                         ('me', '-m'),
+                         ('app', '-a'),
+                         ('mapo', '-p'),
+                         ('reduceOutputPercent', '-u'),
+                         ('fin', '-f'),
+                         ('mapreduce.input.fileinputformat.split.min', '-b'),
+                         ('mapreduce.input.fileinputformat.split.max', '-d'),
+                         ('dfs', '-g'),
+                         ('mapreduce.map.sort.spill.percent', '-h'),
+                         ('yarn.nodemanager.resource.memory-mb', '-j'),
+                         ('mapreduce.task.io.sort.mb', '-k'),
+                         ('mapreduce.task.io.sort.factor', '-n'),
+                         ('mapreduce.reduce.shuffle.merge.percent', '-o'),
+                         ('mapreduce.reduce.shuffle.input.buffer.percent', '-z'),
+                         ('mapreduce.job.reduce.slowstart.completedmaps', '-q'),
+                         ('record', '--recordSize'),
+                         ('mapreduceMapMemory', '--mapreduceMapMemory'),
+                         ('mapreduceReduceMemory', '--mapreduceReduceMemory'),
+                         ('amResourceMB', '--amResourceMB'),
+                         ('mapCpuVcores', '--mapCpuVcores'),
+                         ('reduceCpuVcores', '--reduceCpuVcores'),
+                         ('mapIntensity', '--mapIntensity'),
+                         ('mapSortIntensity', '--mapSortIntensity'),
+                         ('reduceIntensity', '--reduceIntensity'),
+                         ('reduceSortIntensity', '--reduceSortIntensity'),
+                         ('combinerIntensity', '--combinerIntensity'),
+                         ('queueIDs', '--queueIDs'),
+                         ('schQueues', '--schQueues')]
+        self.options_startswith_dict = {key: value for key, value in self.options_startswith_list}
+
+        # option names for presentation
+        self.optionsnamelist = [('-m', 'Memory: '),
+                         ('-c', 'Core Count: '),
+                         ('-s', 'Core Speed: '),
+                         ('-v', 'Max Read Speed: '),
+                         ('-w', 'Max Write Speed: '),
+                         ('-x', 'Min Read Speed: '),
+                         ('-y', 'Min Write Speed: '),
+                         ('-l', 'Link Speed: '),
+                         ('-r', 'Reducer Count: '),
+                         ('-a', 'Application Size: '),
+                         ('-p', 'Map Output Percent: '),
+                         ('-u', 'Reduce Output Percent: '),
+                         ('-f', 'Final Output Percent: '),
+                         ('-b', 'mapreduce.input.fileinputformat.split.minsize: '),
+                         ('-d', 'mapreduce.input.fileinputformat.split.maxsize: '),
+                         ('-g', 'dfsBlocksize: '),
+                         ('-h', 'mapreduce.map.sort.spill.percent: '),
+                         ('-j', 'yarn.nodemanager.resource.memory-mb: '),
+                         ('-k', 'mapreduce.task.io.sort.mb: '),
+                         ('-n', 'mapreduce.task.io.sort.factor: '),
+                         ('-o', 'mapreduce.reduce.shuffle.merge.percent: '),
+                         ('-z', 'mapreduce.reduce.shuffle.input.buffer.percent: '),
+                         ('-q', 'mapreduce.job.reduce.slowstart.completedmaps: '),
+                         ('--recordSize', 'record size: '),
+                         ('--mapreduceMapMemory', 'mapreduce.map.memory.mb: '),
+                         ('--mapreduceReduceMemory', 'mapreduce.reduce.memory.mb: '),
+                         ('--amResourceMB', 'yarn.app.mapreduce.am.resource.mb: '),
+                         ('--mapCpuVcores', 'mapreduce.map.cpu.vcores: '),
+                         ('--reduceCpuVcores', 'mapreduce.reduce.cpu.vcores: '),
+                         ('--mapIntensity', 'Map Intensity: '),
+                         ('--mapSortIntensity', 'Map Sort Intensity: '),
+                         ('--reduceIntensity', 'Reduce Intensity: '),
+                         ('--reduceSortIntensity', 'Reduce Sort Intensity: '),
+                         ('--combinerIntensity', 'Combiner Intensity: ')]
+        self.optionsnamedict = {key: value for key, value in self.optionsnamelist}
 
         # read file to count applications
         TROIKAInput = open(self.args.TROIKAInputFileName,"r")
@@ -176,9 +261,8 @@ schQueues.*:\t\t\t\tCorresponding capacity of queues\n\
                     TROIKAInput.close() 
                     return long(line[16])
                 else:
-                    # default value of yarn.nodemanager.resource.memory-mb (as of version 2.2.0 and 2.3.0)
                     TROIKAInput.close()
-                    return 8192
+                    return self.DEFAULT_RESOURCEMEMSIZE
 
     def getPhysicalMem(self):
         # read from filename
@@ -243,7 +327,7 @@ schQueues.*:\t\t\t\tCorresponding capacity of queues\n\
                 else:
                     queueIDs_schQueues_Flag = False
 
-        self.numberOfLists = numberOfRes
+        self.numberOfResources = numberOfRes
 
     # returns the number of non-range res
     def getNumberOfLists(self):
@@ -275,28 +359,28 @@ schQueues.*:\t\t\t\tCorresponding capacity of queues\n\
 
     def createSortedLists(self):
         resLocations = self.getNumberOfLists()
-        sortedSystems = [[] for i in range(self.numberOfLists)]
+        sortedSystems = [[] for i in range(self.numberOfResources)]
 
-        for i in xrange(self.numberOfLists):
+        for i in xrange(self.numberOfResources):
             sortedSystems[i].extend(sorted(self._systemsToBeTested, key=lambda mem: float(mem.split(None, resLocations[i]+1)[resLocations[i]]), reverse=True))
 
         return sortedSystems
 
-    def checkSampleInufficiency(self):
+    def checkSampleInsufficiency(self):
 
         if self.args.loglevel > 2:
-            print "[LOG]: self.numberOfConfig: " +  str(self.numberOfConfigs)
-            print "[LOG]: self.numberOfLists: " + str(self.numberOfLists)
+            print "[LOG]: self.numberOfConfig: " +  str(self.numberOfBundles)
+            print "[LOG]: self.numberOfResources: " + str(self.numberOfResources)
             print "[LOG]: self.SAMPLES_PER_PARAM: " + str(self.SAMPLES_PER_PARAM)
 
         # first order RSM model
-        if self.RSM_MODEL == 1 and (self.numberOfConfigs < self.numberOfLists*self.SAMPLES_PER_PARAM):
-            print "Number of Alternatives: " + str(self.numberOfConfigs) + " required Samples: " + str(self.numberOfLists*self.SAMPLES_PER_PARAM)
+        if self.RSM_MODEL == 1 and (self.numberOfBundles < self.numberOfResources*self.SAMPLES_PER_PARAM):
+            print "Number of Alternatives: " + str(self.numberOfBundles) + " required Samples: " + str(self.numberOfResources*self.SAMPLES_PER_PARAM)
             return True     # Insufficient number of configs!
 
         # second order RSM model
-        elif self.RSM_MODEL == 2 and (self.numberOfConfigs < ((self.numberOfLists*(self.numberOfLists+3))/2)*self.SAMPLES_PER_PARAM):
-            print "Number of Alternatives: " + str(self.numberOfConfigs) + " required Samples: " + str(((self.numberOfLists*(self.numberOfLists+3))/2)*self.SAMPLES_PER_PARAM)
+        elif self.RSM_MODEL == 2 and (self.numberOfBundles < ((self.numberOfResources*(self.numberOfResources+3))/2)*self.SAMPLES_PER_PARAM):
+            print "Number of Alternatives: " + str(self.numberOfBundles) + " required Samples: " + str(((self.numberOfResources*(self.numberOfResources+3))/2)*self.SAMPLES_PER_PARAM)
             return True     # Insufficient number of configs!
 
         return False
@@ -343,18 +427,18 @@ schQueues.*:\t\t\t\tCorresponding capacity of queues\n\
                     self._systemsToBeTested.append(x)
                     self.simID_clusterCost[lisOfWords[1]] = totalCost
       
-        self.numberOfConfigs = len(self._systemsToBeTested)
+        self.numberOfBundles = len(self._systemsToBeTested)
 
         # sanity check for existence of at least one available bundle
-        if self.numberOfConfigs == 0:
+        if self.numberOfBundles == 0:
             sys.exit('Please check your input list and make sure that for at least one of the systems in it, you have sufficient memory and your budget is above the cost of the cluster')
 
-        # set self.numberOfLists
+        # set self.numberOfResources
         self.setNumberOfLists()
 
         # sanity check for RSM compliance (if either RSM was not intended to be used or if there is 
         # insufficient number of available bundles, then use multi-dimensional optimization)
-        if self.useRSM and self.checkSampleInufficiency():
+        if self.useRSM and self.checkSampleInsufficiency():
             print "Sample size is less than user's request after the pruning. RSM cannot be used. Fallback to multidimensional optimization."
             self.useRSM = False
 
@@ -362,7 +446,7 @@ schQueues.*:\t\t\t\tCorresponding capacity of queues\n\
             # create sorted list for each non-range res
             self.sortedSystems = self.createSortedLists()
 
-        return self.numberOfConfigs
+        return self.numberOfBundles
 
     def extractCommand(self, system):
 
@@ -405,78 +489,16 @@ schQueues.*:\t\t\t\tCorresponding capacity of queues\n\
             # detect resource names
             elif resCount == 1:
 
-                if word == 'cores':
-                    regularCommand += " -c "
-                elif word.startswith('coresp'):
-                    regularCommand += " -s "
-                elif word.startswith('nets'):
-                    regularCommand += " -l "
-                elif word.startswith('maxr'):
-                    regularCommand += " -v "
-                elif word.startswith('maxw'):
-                    regularCommand += " -w "
-                elif word.startswith('minr'):
-                    regularCommand += " -x "
-                elif word.startswith('minw'):
-                    regularCommand += " -y "
-                elif word.startswith('me'):
-                    regularCommand += " -m "
-                elif word.startswith('app'):
-                    regularCommand += " -a "
-                elif word.startswith('mapo'):
-                    regularCommand += " -p "
-                elif word.startswith('reduceOutputPercent'):
-                    regularCommand += " -u "
-                elif word.startswith('fin'):
-                    regularCommand += " -f "
-                elif word.startswith('mapreduce.input.fileinputformat.split.min'):
-                    regularCommand += " -b "
-                elif word.startswith('mapreduce.input.fileinputformat.split.max'):
-                    regularCommand += " -d "
-                elif word.startswith('dfs'):
-                    regularCommand += " -g "
-                elif word.startswith('mapreduce.map.sort.spill.percent'):
-                    regularCommand += " -h "
-                elif word.startswith('yarn.nodemanager.resource.memory-mb'):
-                    regularCommand += " -j "
-                elif word.startswith('mapreduce.task.io.sort.mb'):
-                    regularCommand += " -k "
-                elif word.startswith('mapreduce.task.io.sort.factor'):
-                    regularCommand += " -n "
-                elif word.startswith('mapreduce.reduce.shuffle.merge.percent'):
-                    regularCommand += " -o "
-                elif word.startswith('mapreduce.reduce.shuffle.input.buffer.percent'):
-                    regularCommand += " -z "
-                elif word.startswith('mapreduce.job.reduce.slowstart.completedmaps'):
-                    regularCommand += " -q "
-                elif word.startswith('record'):
-                    regularCommand += " --recordSize "
-                elif word.startswith('mapreduceMapMemory'):
-                    regularCommand += " --mapreduceMapMemory "
-                elif word.startswith('mapreduceReduceMemory'):
-                    regularCommand += " --mapreduceReduceMemory "
-                elif word.startswith('amResourceMB'):
-                    regularCommand += " --amResourceMB "
-                elif word.startswith('mapCpuVcores'):
-                    regularCommand += " --mapCpuVcores "
-                elif word.startswith('reduceCpuVcores'):
-                    regularCommand += " --reduceCpuVcores "
-                elif word.startswith('mapIntensity'):
-                    regularCommand += " --mapIntensity "
-                elif word.startswith('mapSortIntensity'):
-                    regularCommand += " --mapSortIntensity "
-                elif word.startswith('reduceIntensity'):
-                    regularCommand += " --reduceIntensity "
-                elif word.startswith('reduceSortIntensity'):
-                    regularCommand += " --reduceSortIntensity "
-                elif word.startswith('combinerIntensity'):
-                    regularCommand += " --combinerIntensity "
-                elif word.startswith('queueIDs'):
-                    regularCommand += " --queueIDs "
-                    queueIDs_schQueues_Flag = True
-                elif word.startswith('schQueues'):
-                    regularCommand += " --schQueues "
-                    queueIDs_schQueues_Flag = True
+                if word in self.options_equal_dict:
+                    regularCommand += ' ' + self.options_equal_dict[word] + ' '
+
+                else:
+                    for k,v in self.options_startswith_dict.iteritems():
+                        if k.startswith(word):
+                            regularCommand +=  ' ' + v + ' '
+
+                            if v == '--schQueues' or v == '--queueIDs':
+                                queueIDs_schQueues_Flag = True
 
             # detect resource values 
             elif resCount == 0:
@@ -597,19 +619,20 @@ schQueues.*:\t\t\t\tCorresponding capacity of queues\n\
 
     def getMaxMinResList(self, order):
 
-        maxList = [0.0] * self.numberOfLists
-        minList = [sys.float_info.max] * self.numberOfLists
+        maxList = [0.0] * self.numberOfResources
+        minList = [sys.float_info.max] * self.numberOfResources
         rowID = 0
         colID = 0
         numberOfOnes = -1
 
         if order == 1:
-            numberOfOnes = self.numberOfLists*self.SAMPLES_PER_PARAM
+            numberOfOnes = self.numberOfResources*self.SAMPLES_PER_PARAM
 
         elif order == 2:
-            numberOfOnes = ((self.numberOfLists*(self.numberOfLists+3))/2)*self.SAMPLES_PER_PARAM
+            numberOfOnes = ((self.numberOfResources*(self.numberOfResources+3))/2)*self.SAMPLES_PER_PARAM
 
-        resMatrix = asmatrix(ones((numberOfOnes,self.numberOfLists)))
+        resMatrix = asmatrix(ones((self.numberOfBundles,self.numberOfResources)))
+        resDoneFlag = False
 
         for system in self._systemsToBeTested:
             lisOfWords = system.split()
@@ -629,11 +652,12 @@ schQueues.*:\t\t\t\tCorresponding capacity of queues\n\
                         resMatrix[rowID, colID] = float(lisOfWords[long(index +1)])
                         colID += 1
 
-                        if maxList[resIndex] < resMatrix[rowID, colID-1]:
-                            maxList[resIndex] = resMatrix[rowID, colID-1]
-                        if minList[resIndex] > resMatrix[rowID, colID-1]:
-                            minList[resIndex] = resMatrix[rowID, colID-1]
-                        resIndex += 1
+                        if not resDoneFlag:
+                            if maxList[resIndex] < resMatrix[rowID, colID-1]:
+                                maxList[resIndex] = resMatrix[rowID, colID-1]
+                            if minList[resIndex] > resMatrix[rowID, colID-1]:
+                                minList[resIndex] = resMatrix[rowID, colID-1]
+                            resIndex += 1
 
                 elif queueIDs_schQueues_Flag:
                     if self.isNumber(word):
@@ -641,18 +665,19 @@ schQueues.*:\t\t\t\tCorresponding capacity of queues\n\
                         resMatrix[rowID, colID] = float(lisOfWords[long(index)])
                         colID += 1
 
-                        if maxList[resIndex] < resMatrix[rowID, colID-1]:
-                            maxList[resIndex] = resMatrix[rowID, colID-1]
-                        if minList[resIndex] > resMatrix[rowID, colID-1]:
-                            minList[resIndex] = resMatrix[rowID, colID-1]
-                        resIndex += 1
+                        if not resDoneFlag:
+                            if maxList[resIndex] < resMatrix[rowID, colID-1]:
+                                maxList[resIndex] = resMatrix[rowID, colID-1]
+                            if minList[resIndex] > resMatrix[rowID, colID-1]:
+                                minList[resIndex] = resMatrix[rowID, colID-1]
+                            resIndex += 1
                     else:
                         queueIDs_schQueues_Flag = False
 
                 index += 1
 
             if rowID == numberOfOnes -1:
-                break
+                resDoneFlag = True
 
             rowID += 1
             colID = 0
@@ -661,7 +686,6 @@ schQueues.*:\t\t\t\tCorresponding capacity of queues\n\
             if maxList[index] == minList[index] :
                 print "[LOG]: Parameter value " + str(maxList[index]) + " is the same for the specific parameter"
                 sys.exit('Make sure that samples contain at least one different value for each parameter!')
-
 
         return maxList, minList, resMatrix
 
@@ -673,56 +697,87 @@ schQueues.*:\t\t\t\tCorresponding capacity of queues\n\
         numberOfCols = -1
 
         if order == 1:
-            numberOfRows = self.numberOfLists*self.SAMPLES_PER_PARAM
-            numberOfCols = self.numberOfLists+1
+            numberOfRows = self.numberOfResources*self.SAMPLES_PER_PARAM
+            numberOfCols = self.numberOfResources+1
 
         elif order == 2:
-            numberOfRows = ((self.numberOfLists*(self.numberOfLists+3))/2)*self.SAMPLES_PER_PARAM
-            numberOfCols = ((self.numberOfLists*(self.numberOfLists+3))/2)+1
+            numberOfRows = ((self.numberOfResources*(self.numberOfResources+3))/2)*self.SAMPLES_PER_PARAM
+            numberOfCols = ((self.numberOfResources*(self.numberOfResources+3))/2)+1
 
         # create X matrix
         X_matrix = asmatrix(ones((numberOfRows,numberOfCols)))
 
+        # creaete X_matrix_nat
+        X_matrix_nat = asmatrix(ones((numberOfRows,numberOfCols)))
+
+        # create X_matrix_complete
+        X_matrix_complete = asmatrix(ones((self.numberOfBundles,numberOfCols)))
+
         for rID in xrange(numberOfRows):
-            for cID in xrange(1, self.numberOfLists+1):
+            for cID in xrange(1, self.numberOfResources+1):
                 X_matrix[rID, cID] = (resMatrix[rID, cID-1]-((maxRes[cID-1]+minRes[cID-1])/2.0))/((maxRes[cID-1]-minRes[cID-1])/2.0)
+                X_matrix_nat[rID, cID] = resMatrix[rID, cID-1]
+                X_matrix_complete[rID, cID] = (resMatrix[rID, cID-1]-((maxRes[cID-1]+minRes[cID-1])/2.0))/((maxRes[cID-1]-minRes[cID-1])/2.0)
         
+        for rID in xrange(numberOfRows, self.numberOfBundles):
+            for cID in xrange(1, self.numberOfResources+1):
+                X_matrix_complete[rID, cID] = (resMatrix[rID, cID-1]-((maxRes[cID-1]+minRes[cID-1])/2.0))/((maxRes[cID-1]-minRes[cID-1])/2.0)
+
         # set the remaining parts of the X_matrix for 2nd order RSM model with interaction
         if order == 2:
-
             # squares in the formula
             for rID in xrange(numberOfRows):
-                for cID in xrange(self.numberOfLists+1, 2*self.numberOfLists+1):
-                    X_matrix[rID, cID] = X_matrix[rID, cID-self.numberOfLists]*X_matrix[rID, cID-self.numberOfLists]
+                for cID in xrange(self.numberOfResources+1, 2*self.numberOfResources+1):
+                    X_matrix[rID, cID] = X_matrix[rID, cID-self.numberOfResources]*X_matrix[rID, cID-self.numberOfResources]
+                    X_matrix_nat[rID, cID] = X_matrix_nat[rID, cID-self.numberOfResources]*X_matrix_nat[rID, cID-self.numberOfResources]
+                    X_matrix_complete[rID, cID] = X_matrix_complete[rID, cID-self.numberOfResources]*X_matrix_complete[rID, cID-self.numberOfResources]
+
+            # squares in the formula
+            for rID in xrange(numberOfRows, self.numberOfBundles):
+                for cID in xrange(self.numberOfResources+1, 2*self.numberOfResources+1):
+                    X_matrix_complete[rID, cID] = X_matrix_complete[rID, cID-self.numberOfResources]*X_matrix_complete[rID, cID-self.numberOfResources]
 
             # multiplications among different terms
             for rID in xrange(numberOfRows):
                 # the first term is interacting with k-1 terms
-                interactingTermCount = self.numberOfLists-1
-                head = self.numberOfLists-interactingTermCount
+                interactingTermCount = self.numberOfResources-1
+                head = self.numberOfResources-interactingTermCount
                 interactingOrder = head+1
 
-                for cID in xrange(2*self.numberOfLists+1, numberOfCols):
+                for cID in xrange(2*self.numberOfResources+1, numberOfCols):
                     # calculate the value
                     X_matrix[rID, cID] = X_matrix[rID, head]*X_matrix[rID, interactingOrder]
+                    X_matrix_complete[rID, cID] = X_matrix_complete[rID, head]*X_matrix_complete[rID, interactingOrder]
+                    X_matrix_nat[rID, cID] = X_matrix_nat[rID, head]*X_matrix_nat[rID, interactingOrder]
 
-                    if interactingOrder == self.numberOfLists:
+                    if interactingOrder == self.numberOfResources:
                         interactingTermCount-=1
-                        head = self.numberOfLists-interactingTermCount
+                        head = self.numberOfResources-interactingTermCount
                         interactingOrder = head+1
                     else:
                         interactingOrder += 1
 
+            # multiplications among different terms
+            for rID in xrange(numberOfRows, self.numberOfBundles):
+                # the first term is interacting with k-1 terms
+                interactingTermCount = self.numberOfResources-1
+                head = self.numberOfResources-interactingTermCount
+                interactingOrder = head+1
 
-        return maxRes, minRes, X_matrix
+                for cID in xrange(2*self.numberOfResources+1, numberOfCols):
+                    # calculate the value
+                    X_matrix_complete[rID, cID] = X_matrix_complete[rID, head]*X_matrix_complete[rID, interactingOrder]
 
-    def generateYmatrix(self, order):
+                    if interactingOrder == self.numberOfResources:
+                        interactingTermCount-=1
+                        head = self.numberOfResources-interactingTermCount
+                        interactingOrder = head+1
+                    else:
+                        interactingOrder += 1
 
-        if order == 1:
-            numberOfRows = self.numberOfLists*self.SAMPLES_PER_PARAM
+        return maxRes, minRes, X_matrix, X_matrix_nat, X_matrix_complete
 
-        elif order == 2:
-            numberOfRows = ((self.numberOfLists*(self.numberOfLists+3))/2)*self.SAMPLES_PER_PARAM
+    def generateYmatrix(self, numberOfRows):
 
         # this matrix will keep the sample results gathered from simulation
         y_matrix = asmatrix(ones((numberOfRows,1)))
@@ -738,6 +793,9 @@ schQueues.*:\t\t\t\tCorresponding capacity of queues\n\
 
             # perform the test 
             toBeWritten, bestCommand = self.performanceTest(regularCommand, simId, rangedCommand, totSimCount)
+
+            print "toBeWritten " + str(toBeWritten)
+            print "bestCommand " + str(bestCommand)
 
             y_matrix[sysID] = float(toBeWritten.split(None, 2)[1])
 
@@ -775,71 +833,16 @@ schQueues.*:\t\t\t\tCorresponding capacity of queues\n\
         coefColID = posInTriangle-value+1
         return coefRowID, coefColID
 
-    def get_decoded_b_matrix(self, b_matrix, maxRes, minRes):
-
-        decoded_b_matrix = asmatrix(ones((len(b_matrix),1)))
-        decoded_b_matrix[0,0] = b_matrix[0,0]
-
-        if self.RSM_MODEL == 1:
-            for row in xrange(1, len(b_matrix)):
-                decoded_b_matrix[0,0] -= ((maxRes[row-1]+minRes[row-1])/(maxRes[row-1]-minRes[row-1]))*b_matrix[row,0]
-                decoded_b_matrix[row,0] = b_matrix[row,0] / ((maxRes[row-1]-minRes[row-1])/2.0)
-
-        else:
-            # four-phase setting process. 
-            # set constant term and first order terms in the first phase (partially)
-            # continue setting their values in the second phase
-
-            # init phase
-            mL = [0.0] * len(maxRes)
-            nL = [0.0] * len(maxRes)
-
-            for row in xrange(1, len(maxRes)+1):
-                mL[row-1] = (maxRes[row-1]+minRes[row-1])
-                nL[row-1] = (maxRes[row-1]-minRes[row-1])
-
-            # first phase
-            for row in xrange(1, len(maxRes)+1):
-                decoded_b_matrix[0,0] -= (mL[row-1]/nL[row-1])*b_matrix[row,0]
-                decoded_b_matrix[row,0] = b_matrix[row,0] / (nL[row-1]/2.0)
-
-            # second phase
-            for row in xrange(len(maxRes)+1, 2*len(maxRes)+1):
-                decoded_b_matrix[0,0] += (mL[row-1-len(maxRes)]/nL[row-1-len(maxRes)]) * (mL[row-1-len(maxRes)]/nL[row-1-len(maxRes)]) *b_matrix[row,0]
-                decoded_b_matrix[row-len(maxRes),0] -= 4*b_matrix[row,0] * mL[row-1-len(maxRes)] / (nL[row-1-len(maxRes)] * nL[row-1-len(maxRes)])
-                decoded_b_matrix[row,0] = 4*b_matrix[row,0] / (nL[row-1-len(maxRes)] * nL[row-1-len(maxRes)])
-
-            # third phase
-            for row in xrange(2*len(maxRes)+1, len(b_matrix)):
-                coefRowID, coefColID = self.getRowColID(row, len(maxRes))
-                decoded_b_matrix[0,0] += b_matrix[row,0] * ((mL[coefRowID-1] * mL[coefRowID + coefColID-1]) / (nL[coefRowID-1] * nL[coefRowID + coefColID-1]))
-                decoded_b_matrix[row,0] = 4*b_matrix[row,0] / (nL[coefRowID-1] * nL[coefRowID + coefColID-1])
-
-            # fourth phase (first order regulars remaining calculations)
-            for index in xrange(1, len(maxRes)+1):
-                for coef in xrange(2*len(maxRes)+1, len(b_matrix)):
-                    # get the row and column id of the index of coefficient.
-                    # this function is needed to determine the positions for
-                    # generating coefficients of first-order terms.
-                    # len(maxRes) represents the number of parameters
-                    coefRowID, coefColID = self.getRowColID(coef, len(maxRes))
-
-                    # check that the order is 
-                    if (coefRowID == index) or (coefRowID + coefColID == index):
-                        decoded_b_matrix[index,0] -= 2*b_matrix[coef,0]* ( mL[coefRowID + coefColID-1] /(nL[coefRowID-1] * nL[coefRowID + coefColID-1]) )
-
-        return decoded_b_matrix
-
     def get_sysResMatrix(self):
 
         numCols = 0
 
         if self.RSM_MODEL == 1:
-            numCols = self.numberOfLists +1
+            numCols = self.numberOfResources +1
         else:
-            numCols = ((self.numberOfLists*(self.numberOfLists+3))/2) +1
+            numCols = ((self.numberOfResources*(self.numberOfResources+3))/2) +1
 
-        sysResMatrix = asmatrix(ones((self.numberOfConfigs,numCols)))
+        sysResMatrix = asmatrix(ones((self.numberOfBundles,numCols)))
 
         rowID = 0
         colID = 0
@@ -876,34 +879,41 @@ schQueues.*:\t\t\t\tCorresponding capacity of queues\n\
         if self.RSM_MODEL == 2:
 
             # squares in the formula
-            for rID in xrange(self.numberOfConfigs):
-                for cID in xrange(self.numberOfLists+1, 2*self.numberOfLists+1):
-                    sysResMatrix[rID, cID] = sysResMatrix[rID, cID-self.numberOfLists]*sysResMatrix[rID, cID-self.numberOfLists]
+            for rID in xrange(self.numberOfBundles):
+                for cID in xrange(self.numberOfResources+1, 2*self.numberOfResources+1):
+                    sysResMatrix[rID, cID] = sysResMatrix[rID, cID-self.numberOfResources]*sysResMatrix[rID, cID-self.numberOfResources]
 
             # multiplications among different terms
-            for rID in xrange(self.numberOfConfigs):
+            for rID in xrange(self.numberOfBundles):
                 # the first term is interacting with k-1 terms
-                interactingTermCount = self.numberOfLists-1
-                head = self.numberOfLists-interactingTermCount
+                interactingTermCount = self.numberOfResources-1
+                head = self.numberOfResources-interactingTermCount
                 interactingOrder = head+1
 
-                for cID in xrange(2*self.numberOfLists+1, numCols):
+                for cID in xrange(2*self.numberOfResources+1, numCols):
                     # calculate the value
                     sysResMatrix[rID, cID] = sysResMatrix[rID, head]*sysResMatrix[rID, interactingOrder]
 
-                    if interactingOrder == self.numberOfLists:
+                    if interactingOrder == self.numberOfResources:
                         interactingTermCount-=1
-                        head = self.numberOfLists-interactingTermCount
+                        head = self.numberOfResources-interactingTermCount
                         interactingOrder = head+1
                     else:
                         interactingOrder += 1
 
         return sysResMatrix
 
-    def get_y_head_matrix(self, decoded_b_matrix):
+    def get_y_head_matrix(self, b_matrix, X_matrix_complete, b_matrix_nat=None):
         # calculate and store y_head value for all the systems in input file, containing the bundles
-        sysResMatrix = self.get_sysResMatrix()
-        return sysResMatrix * decoded_b_matrix
+        
+        if b_matrix_nat is not None:
+            sysResMatrix = self.get_sysResMatrix()
+
+            print "ST----------PLAIN--NEW------------"
+            print sysResMatrix * b_matrix_nat
+            print "EN----------PLAIN--NEW------------"
+
+        return (X_matrix_complete * b_matrix)
 
     def getSortedSystems(self, y_head_list):
         return [a for (b,a) in sorted(zip(y_head_list,self._systemsToBeTested))]
@@ -916,9 +926,9 @@ schQueues.*:\t\t\t\tCorresponding capacity of queues\n\
 
                 optimizerIsSelected = True
 
-                for listID in xrange(self.numberOfLists):
+                for listID in xrange(self.numberOfResources):
 
-                    for configID in xrange(self.numberOfConfigs):
+                    for configID in xrange(self.numberOfBundles):
                         if self.args.loglevel > 0:
                             print("[LOG]: Start simulation for simID: " + str(self.sortedSystems[listID][configID].split(None, 2)[1]))
 
@@ -942,7 +952,7 @@ schQueues.*:\t\t\t\tCorresponding capacity of queues\n\
                             break
             else:
                 # calculate coding scheme to map all the variable values between [-1, 1] and generate X_matrix
-                maxRes, minRes, X_matrix = self.calculateCodingScheme(self.RSM_MODEL)
+                maxRes, minRes, X_matrix, X_matrix_nat, X_matrix_complete = self.calculateCodingScheme(self.RSM_MODEL)
 
                 if self.args.loglevel > 2:
                     print "[LOG]: maxRes " + str(maxRes)
@@ -954,6 +964,11 @@ schQueues.*:\t\t\t\tCorresponding capacity of queues\n\
 
                 # calculate X'X
                 Xprime_X = self.getXprime_X(X_matrix)
+
+                if self.args.debugMode == 1:
+                    #calculate natural X'X
+                    Xprime_X_nat = self.getXprime_X(X_matrix_nat)
+
                 # singularity check
                 if linalg.det(Xprime_X) == 0:
                     self.useRSM = False
@@ -967,18 +982,45 @@ schQueues.*:\t\t\t\tCorresponding capacity of queues\n\
                 else:
                     optimizerIsSelected = True
                     # generate y matrix
-                    y_matrix = self.generateYmatrix(self.RSM_MODEL)
+                    y_matrix = self.generateYmatrix(len(X_matrix))
+                    
                     # calculate X'y
                     Xprime_y = self.getXprime_y(X_matrix, y_matrix)
+
+                    if self.args.debugMode == 1:
+                        # calculate natural X'y
+                        Xprime_y_nat = self.getXprime_y(X_matrix_nat, y_matrix)
 
                     # calculate b
                     b_matrix = self.getb_matrix(Xprime_X, Xprime_y)
 
-                    # calculate decoded b
-                    decoded_b_matrix = self.get_decoded_b_matrix(b_matrix, maxRes, minRes)
+                    if self.args.debugMode == 1:
+                        # calculate b_matrix_nat
+                        b_matrix_nat = self.getb_matrix(Xprime_X_nat, Xprime_y_nat)
 
-                    # calculate y_head
-                    y_head_matrix = self.get_y_head_matrix(decoded_b_matrix)
+                    if self.args.loglevel > 2:
+                        print "START: b_matrix"
+                        print len(b_matrix)
+                        print b_matrix
+                        print "END: b_matrix"
+
+                        if self.args.debugMode == 1:
+                            print "START: b_matrix_nat"
+                            print len(b_matrix_nat)
+                            print b_matrix_nat
+                            print "END: b_matrix_nat"
+
+
+                    if self.args.debugMode == 1:
+                        # calculate y_head
+                        y_head_matrix = self.get_y_head_matrix(b_matrix, X_matrix_complete, b_matrix_nat)
+                    else: 
+                        # calculate y_head
+                        y_head_matrix = self.get_y_head_matrix(b_matrix, X_matrix_complete)
+
+                    # print "---------------------y_head_matrix---------------------"
+                    # print y_head_matrix
+                    # print "---------------------y_head_matrix---------------------"
 
                     # convert matrix to a list
                     y_head_list = array(y_head_matrix.T)[0].tolist()
@@ -1023,77 +1065,11 @@ schQueues.*:\t\t\t\tCorresponding capacity of queues\n\
         queueIDs_params = []
         schQueues_params = []
 
-        results = [0] * 34
         for word in listOfWords:
 
-            if word == '-m':
-                results[0] = listOfWords.index(word) + 1
-            elif word == '-c':
-                results[1] = listOfWords.index(word) + 1
-            elif word == '-s':
-                results[2] = listOfWords.index(word) + 1
-            elif word == '-v':
-                results[3] = listOfWords.index(word) + 1
-            elif word == '-w':
-                results[4] = listOfWords.index(word) + 1
-            elif word == '-x':
-                results[5] = listOfWords.index(word) + 1
-            elif word == '-y':
-                results[6] = listOfWords.index(word) + 1
-            elif word == '-l':
-                results[7] = listOfWords.index(word) + 1
-            elif word == '-r':
-                results[8] = listOfWords.index(word) + 1
-            elif word == '-a':
-                results[9] = listOfWords.index(word) + 1
-            elif word == '-p':
-                results[10] = listOfWords.index(word) + 1
-            elif word == '-u':
-                results[11] = listOfWords.index(word) + 1
-            elif word == '-f':
-                results[12] = listOfWords.index(word) + 1
-            elif word == '-b':
-                results[13] = listOfWords.index(word) + 1
-            elif word == '-d':
-                results[14] = listOfWords.index(word) + 1
-            elif word == '-g':
-                results[15] = listOfWords.index(word) + 1
-            elif word == '-h':
-                results[16] = listOfWords.index(word) + 1
-            elif word == '-j':
-                results[17] = listOfWords.index(word) + 1
-            elif word == '-k':
-                results[18] = listOfWords.index(word) + 1
-            elif word == '-n':
-                results[19] = listOfWords.index(word) + 1
-            elif word == '-o':
-                results[20] = listOfWords.index(word) + 1
-            elif word == '-z':
-                results[21] = listOfWords.index(word) + 1
-            elif word == '-q':
-                results[22] = listOfWords.index(word) + 1
-            elif word == '--recordSize':
-                results[23] = listOfWords.index(word) + 1
-            elif word == '--mapreduceMapMemory':
-                results[24] = listOfWords.index(word) + 1
-            elif word == '--mapreduceReduceMemory':
-                results[25] = listOfWords.index(word) + 1
-            elif word == '--amResourceMB':
-                results[26] = listOfWords.index(word) + 1
-            elif word == '--mapCpuVcores':
-                results[27] = listOfWords.index(word) + 1
-            elif word == '--reduceCpuVcores':
-                results[28] = listOfWords.index(word) + 1
-            elif word == '--mapIntensity':
-                results[29] = listOfWords.index(word) + 1
-            elif word == '--mapSortIntensity':
-                results[30] = listOfWords.index(word) + 1
-            elif word == '--reduceIntensity':
-                results[31] = listOfWords.index(word) + 1
-            elif word == '--reduceSortIntensity':
-                results[32] = listOfWords.index(word) + 1
-            elif word == '--combinerIntensity':
-                results[33] = listOfWords.index(word) + 1
+            if word in self.optionsnamedict:
+                self.paramFlag_value[word] = listOfWords.index(word) + 1
+
             elif word == '--queueIDs':
                 # get all queueID parameters
                 done = False
@@ -1120,74 +1096,9 @@ schQueues.*:\t\t\t\tCorresponding capacity of queues\n\
                     else:
                         done = True
 
-        if results[0] != 0:
-            print "Memory: " + str(listOfWords[results[0]])
-        if results[1] != 0:
-            print "Core Count: " + str(listOfWords[results[1]])
-        if results[2] != 0:
-            print "Core Speed: " + str(listOfWords[results[2]])
-        if results[3] != 0:
-            print "Max Read Speed: " + str(listOfWords[results[3]])
-        if results[4] != 0:
-            print "Max Write Speed: " + str(listOfWords[results[4]])
-        if results[5] != 0:
-            print "Min Read Speed: " + str(listOfWords[results[5]])
-        if results[6] != 0:
-            print "Min Write Speed: " + str(listOfWords[results[6]])
-        if results[7] != 0:
-            print "Link Speed: " + str(listOfWords[results[7]])
-        if results[8] != 0:
-            print "Reducer Count: " + str(listOfWords[results[8]])
-        if results[9] != 0:
-            print "Application Size: " + str(listOfWords[results[9]])
-        if results[10] != 0:
-            print "Map Output Percent: " + str(listOfWords[results[10]])
-        if results[11] != 0:
-            print "Reduce Output Percent: " + str(listOfWords[results[11]])
-        if results[12] != 0:
-            print "Final Output Percent: " + str(listOfWords[results[12]])
-        if results[13] != 0:
-            print "mapreduce.input.fileinputformat.split.minsize: " + str(listOfWords[results[13]])
-        if results[14] != 0:
-            print "mapreduce.input.fileinputformat.split.maxsize: " + str(listOfWords[results[14]])
-        if results[15] != 0:
-            print "dfsBlocksize: " + str(listOfWords[results[15]])
-        if results[16] != 0:
-            print "mapreduce.map.sort.spill.percent: " + str(listOfWords[results[16]])
-        if results[17] != 0:
-            print "yarn.nodemanager.resource.memory-mb: " + str(listOfWords[results[17]])
-        if results[18] != 0:
-            print "mapreduce.task.io.sort.mb: " + str(listOfWords[results[18]])
-        if results[19] != 0:
-            print "mapreduce.task.io.sort.factor: " + str(listOfWords[results[19]])
-        if results[20] != 0:
-            print "mapreduce.reduce.shuffle.merge.percent: " + str(listOfWords[results[20]])
-        if results[21] != 0:
-            print "mapreduce.reduce.shuffle.input.buffer.percent: " + str(listOfWords[results[21]])
-        if results[22] != 0:
-            print "mapreduce.job.reduce.slowstart.completedmaps: " + str(listOfWords[results[22]])
-        if results[23] != 0:
-            print "record size: " + str(listOfWords[results[23]])
-        if results[24] != 0:
-            print "mapreduce.map.memory.mb: " + str(listOfWords[results[24]])
-        if results[25] != 0:
-            print "mapreduce.reduce.memory.mb: " + str(listOfWords[results[25]])
-        if results[26] != 0:
-            print "yarn.app.mapreduce.am.resource.mb: " + str(listOfWords[results[26]])
-        if results[27] != 0:
-            print "mapreduce.map.cpu.vcores: " + str(listOfWords[results[27]])
-        if results[28] != 0:
-            print "mapreduce.reduce.cpu.vcores: " + str(listOfWords[results[28]])
-        if results[29] != 0:
-            print "Map Intensity: " + str(listOfWords[results[29]])
-        if results[30] != 0:
-            print "Map Sort Intensity: " + str(listOfWords[results[30]])
-        if results[31] != 0:
-            print "Reduce Intensity: " + str(listOfWords[results[31]])
-        if results[32] != 0:
-            print "Reduce Sort Intensity: " + str(listOfWords[results[32]])
-        if results[33] != 0:
-            print "Combiner Intensity: " + str(listOfWords[results[33]])
+        # present recommended parameters
+        for key, val in self.paramFlag_value.iteritems():
+            print self.optionsnamedict[key] + listOfWords[val]
 
         # print contents of queue IDs and corresponding capacities
         if len(queueIDs_params) > 0:
@@ -1212,7 +1123,7 @@ try:
     numberOfConfigs = myRecommender.eliminate()
     bestPerf, bestCmd = myRecommender.tester()
 
-    print "Recommendation Generation Time: " + str(time.time() - start_time) + " seconds"
+    print "Troika Recommendation Generation Time: " + str(time.time() - start_time) + " seconds"
 
     myRecommender.presentResult()
 except IOError, e:

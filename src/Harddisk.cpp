@@ -43,6 +43,8 @@ Harddisk::Harddisk(size_t maxReadSpeed, size_t maxWriteSpeed, size_t minReadSpee
 	remainingWriteCapacity_ = writeDist(generator) + minWriteSpeed;
 	totalReadCapacity_ = remainingReadCapacity_;
 	totalWriteCapacity_ = remainingWriteCapacity_;
+
+	debugTotalReduce_=0;
 }
 
 Harddisk::~Harddisk() {
@@ -370,6 +372,12 @@ void Harddisk::work (int op, double neededResourceQuantity, Event* ev, int outpu
 			completionEvBeh = SHUFFLE_WRITE_DATA_PARTIALLY_COMPLETE;
 		}
 		else if(op == HD_WRITE_REDUCE_OUTPUT){
+
+			#ifndef TERMINAL_LOG_DISABLED
+			std::cout << "neededResourceQuantity " << neededResourceQuantity << std::endl;
+			debugTotalReduce_ += neededResourceQuantity;
+			std::cout << "debugTotalReduce " << debugTotalReduce_ << std::endl;
+			#endif
 			// write final application output (event behavior: WRITE_REDUCE_OUTPUT)
 			completionEvBeh = WRITE_REDUCE_OUTPUT;
 		}

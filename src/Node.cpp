@@ -511,6 +511,9 @@ void Node::work (Event* ev){
 				std::cout << "AppID: " << appID <<  " >MAPPER ID: " << ev->getFsId() << " START TIME: " << ev->getEventTime() << std::endl;
 				#endif
 
+				// increase active map task count
+				g_scheduler.incrementActiveTaskCount(appID, true);
+
 				(applications.at(appID))->addMapStartTime(ev->getFsId(), ev->getEventTime());
 
 				// seize resources for map task for memory and CPU
@@ -568,6 +571,14 @@ void Node::work (Event* ev){
 			// is it a reducer (attribute LAUNCH_REDUCE: reduce task)
 			else if(ev->getEntityIns().getAttribute() == LAUNCH_REDUCE){
 
+				#ifndef TERMINAL_LOG_DISABLED
+				std::cout << "AppID: " << appID <<  " >REDUCER START TIME: "<< ev->getEventTime() << std::endl;
+				#endif
+
+				// increase active reduce task count
+				g_scheduler.incrementActiveTaskCount(appID, false);
+
+
 				// seize resources for Reducer for memory and CPU
 				if(g_scheduler.isResourceCalculator()){
 					cpu_.setRemainingNumberOfCores(cpu_.getRemainingNumberOfCores() - (applications.at(appID))->getSeizedReduceCpuVcores());
@@ -605,7 +616,7 @@ void Node::work (Event* ev){
 							(applications.at(appID))->signalReducerCompletionWaiter(i);
 						}
 					}
-					// clear shuffle started elements from reducer completion waiter list (those who wait fro reducer to be created to start shuffle...)
+					// clear shuffle started elements from reducer completion waiter list (those who wait from reducer to be created to start shuffle...)
 					(applications.at(appID))->clearFinishedReducerCompletionWaiters();
 				}
 			}
@@ -614,20 +625,17 @@ void Node::work (Event* ev){
 			}
 		}
 
-		else if(currentEvent == READ_NEW_RECORD){		// read one more record for mapper function
+		else if(currentEvent == READ_NEW_RECORD){		// read one more record for map function
 
 			recordInfo newRecord = (applications.at(appID))->getRecordInfo(ev->getFsId());
-
 			if(newRecord.remainingRecordCount_ > BUFFER_NUMBER_OF_PACKETS){	// send BUFFER_NUMBER_OF_PACKETS now. upon completion send more...
 
 				// decrement remaining map record count
 				(applications.at(appID))->decRecordInfoRemainingMapRecordCount(ev->getFsId(), BUFFER_NUMBER_OF_PACKETS);
 
 				ev->setRecordId(newRecord.remainingRecordCount_);
-
 				for(int i=0;i<BUFFER_NUMBER_OF_PACKETS;i++){
 					// read each record and upon completion release the seized resource and start map function on the record just read
-
 					hd_.work(HD_READ_FOR_MAP_TASK, newRecord.eachRecordSize_, ev, outputEventType_);
 					ev->incGlobalEntityId();
 				}
@@ -650,7 +658,7 @@ void Node::work (Event* ev){
 			// if there is no other record to read for this filesplit do nothing...
 		}
 
-		else if(currentEvent == FS_RECORD_READ_FINISH){	/*DOC: completion of filesplit record read in the mapper. now the mapper is ready to start map function and corresponding hd resource will be released */
+		else if(currentEvent == FS_RECORD_READ_FINISH){	/*DOC: completion of filesplit record read in the map. now the map is ready to start map function and corresponding hd resource will be released */
 			// release disk resource
 			hd_.work(READ_RESOURCE_RELEASE, ev->getSeizedResQuantity(), ev, outputEventType_);
 			// done reading! continue with next step (map function).
@@ -686,7 +694,7 @@ void Node::work (Event* ev){
 					for(int i=0;i<BUFFER_NUMBER_OF_PACKETS;i++){
 						// read filesplit from remote and send a response back to the origin
 
-						// send each record seperately.
+						// send each record separately.
 						hd_.work(HD_READ_FROM_REMOTE, ((applications.at(appID))->getRecordSize()), ev, outputEventType_);
 						ev->incGlobalEntityId();
 					}
@@ -698,7 +706,7 @@ void Node::work (Event* ev){
 					ev->setSeizedResQuantity(0);
 					for(int i=0;i<remaining;i++){
 						// read filesplit from remote and send a response back to the origin
-						// send each record seperately.
+						// send each record separately.
 
 						hd_.work(HD_READ_FROM_REMOTE, ((applications.at(appID))->getRecordSize()), ev, outputEventType_);
 						ev->incGlobalEntityId();
@@ -738,7 +746,7 @@ void Node::work (Event* ev){
 
 				for(int i=0;i<BUFFER_NUMBER_OF_PACKETS;i++){
 					// read filesplit from remote and send a response back to the origin
-					// send each record seperately.
+					// send each record separately.
 					hd_.work(HD_READ_FROM_REMOTE, ((applications.at(appID))->getRecordSize()), ev, outputEventType_);
 					ev->incGlobalEntityId();
 				}
@@ -749,7 +757,7 @@ void Node::work (Event* ev){
 
 				for(int i=0;i<numberOfMapRecords;i++){
 					// read filesplit from remote and send a response back to the origin
-					// send each record seperately.
+					// send each record separately.
 					hd_.work(HD_READ_FROM_REMOTE, ((applications.at(appID))->getRecordSize()), ev, outputEventType_);
 					ev->incGlobalEntityId();
 				}
@@ -938,7 +946,7 @@ void Node::work (Event* ev){
 						// set recordId which will be used to determine if there is a need to read more
 						// packets after the releasing resources of BUFFER_NUMBER_OF_PACKETSth packet
 						for(int i=0;i<BUFFER_NUMBER_OF_PACKETS;i++){
-							// read each record seperately.
+							// read each record separately.
 							hd_.work(HD_READ_MAP_OUTPUT, (applications.at(appID))->getRecordSize(), ev, outputEventType_);
 							ev->incGlobalEntityId();
 						}
@@ -946,7 +954,7 @@ void Node::work (Event* ev){
 					else{	// send all packets to the NIC queue
 
 						for(int i=0;i<numberOfMergeRecords;i++){
-							// read each record seperately.
+							// read each record separately.
 							hd_.work(HD_READ_MAP_OUTPUT, (applications.at(appID))->getRecordSize(), ev, outputEventType_);
 							ev->incGlobalEntityId();
 						}
@@ -987,7 +995,7 @@ void Node::work (Event* ev){
 						for(int i=0;i<BUFFER_NUMBER_OF_PACKETS;i++){
 							// read filesplit from remote and send a response back to the origin
 
-							// send each record seperately.
+							// send each record separately.
 							hd_.work(HD_READ_MAP_OUTPUT, (applications.at(appID))->getRecordSize(), ev, outputEventType_);
 							ev->incGlobalEntityId();
 						}
@@ -998,7 +1006,7 @@ void Node::work (Event* ev){
 
 						for(int i=0;i<remaining;i++){
 							// read filesplit from remote and send a response back to the origin
-							// send each record seperately.
+							// send each record separately.
 							hd_.work(HD_READ_MAP_OUTPUT, (applications.at(appID))->getRecordSize(), ev, outputEventType_);
 							ev->incGlobalEntityId();
 						}
@@ -1138,7 +1146,7 @@ void Node::work (Event* ev){
 
 						for(int i=0;i<remaining;i++){
 							// read filesplit from remote and send a response back to the origin
-							// send each record seperately.
+							// send each record separately.
 
 							hd_.work(HD_WRITE_MERGED_DATA, ((applications.at(appID))->getRecordSize()), ev, outputEventType_);
 							ev->incGlobalEntityId();
@@ -1171,6 +1179,11 @@ void Node::work (Event* ev){
 				(applications.at(appID))->saveReadyToShuffleInfo(ev->getFsId(), ev->getDestEventType(), ev->getNeededResQuantity());
 
 				// READY FOR REDUCER PHASE!
+
+
+				// decrease active map task count
+				g_scheduler.decrementActiveTaskCount(appID, true);
+
 				// release map task resources
 				memory_.setRemainingCapacity(memory_.getRemainingCapacity() + (applications.at(appID))->getSeizedMapreduceMapMemory());
 				struct waitingTaskInfo waitingMapper = g_scheduler.schedulerReleaseMapperresources(appID, ev->getDestEventType(), ev->getFsId());
@@ -1189,6 +1202,10 @@ void Node::work (Event* ev){
 					}
 					else{	// map task
 						// attribute carries mapperLocation
+						#ifndef TERMINAL_LOG_DISABLED
+						std::cout << "Create mapper at "<< waitingMapper.taskLocation << " upon releasing a mapper at location: "<< ev->getDestEventType()  << std::endl;
+						#endif
+
 						Event newEvent(waitingMapper.appId, (ev->getEventTime()+OVERHEAD_DELAY),HEARTBEAT_SIZE, 0.0, waitingMapper.outEvent, (applications.at(waitingMapper.appId))->getAmEventType(),
 								START_MAP_CONTAINER, OTHER, SEIZETOMASTER, waitingMapper.taskLocation, waitingMapper.attr, waitingMapper.fsid);
 
@@ -1245,6 +1262,7 @@ void Node::work (Event* ev){
 		/*-----------------------------------------------------MAP PHASE IS COMPLETED-----------------------------------------------------*/
 		/*--------------------------------------------------------------------------------------------------------------------------------*/
 		else if(currentEvent == START_SHUFFLE){	/*DOC: start shuffling */
+
 			#ifndef TERMINAL_LOG_DISABLED
 			std::cout << "AppID " << appID << "+++++++SHUFFLING: READ+++++++TIME:  " << ev->getEventTime() << " NodeId: " << ev->getDestEventType() << " fsID " << ev->getFsId() << " seized: "<< ev->getSeizedResQuantity() << std::endl;
 			#endif
@@ -1293,7 +1311,7 @@ void Node::work (Event* ev){
 			std::cout << "AppID " << appID  << "+++++++SHUFFLE READ FOR WAITERS at :" << ev->getRedId() << " TIME: "<< ev->getEventTime() << " BYTES TO BE PROCESSED: "<< ev->getNeededResQuantity() << std::endl;
 			#endif
 
-			// read each packet seperately from local disk
+			// read each packet separately from local disk
 			// (packets are assumed to be of size ((applications.at(appID))->getRecordSize()))
 
 			double totalSplitSize = ev->getNeededResQuantity();
@@ -1386,7 +1404,7 @@ void Node::work (Event* ev){
 					for(int i=0;i<BUFFER_NUMBER_OF_PACKETS;i++){
 						// read filesplit from remote and send a response back to the origin
 
-						// send each record seperately.
+						// send each record separately.
 						hd_.work(HD_READ_DATA_TO_SHUFFLE, ((applications.at(appID))->getRecordSize()), ev, outputEventType_);
 						ev->incGlobalEntityId();
 					}
@@ -1398,7 +1416,7 @@ void Node::work (Event* ev){
 
 					for(int i=0;i<remaining;i++){
 						// read filesplit from remote and send a response back to the origin
-						// send each record seperately.
+						// send each record separately.
 
 						hd_.work(HD_READ_DATA_TO_SHUFFLE, ((applications.at(appID))->getRecordSize()), ev, outputEventType_);
 						ev->incGlobalEntityId();
@@ -1482,7 +1500,7 @@ void Node::work (Event* ev){
 					for(int i=0;i<BUFFER_NUMBER_OF_PACKETS;i++){
 						// read filesplit from remote and send a response back to the origin
 
-						// send each record seperately.
+						// send each record separately.
 						hd_.work(HD_WRITE_SHUFFLE_DATA_TO_DISK, ((applications.at(appID))->getRecordSize()), ev, outputEventType_);
 						ev->incGlobalEntityId();
 					}
@@ -1493,7 +1511,7 @@ void Node::work (Event* ev){
 
 					for(int i=0;i<remaining;i++){
 						// read filesplit from remote and send a response back to the origin
-						// send each record seperately.
+						// send each record separately.
 
 						hd_.work(HD_WRITE_SHUFFLE_DATA_TO_DISK, ((applications.at(appID))->getRecordSize()), ev, outputEventType_);
 						ev->incGlobalEntityId();
@@ -1593,6 +1611,7 @@ void Node::work (Event* ev){
 				#ifndef TERMINAL_LOG_DISABLED
 				std::cout << "AppID: " << appID<< " ON DISK MERGE!"  << ev->getRedId() << " numberofWaiting2BeMerged " << numberofWaiting2BeMerged<< std::endl;
 				#endif
+
 				// merge the last "mapreduce.task.io.sort.factor" files
 				bool isOngoingOnDiskMerge = (applications.at(appID))->addReadyForOnDiskMergeCount_(ev->getRedId());
 
@@ -1620,10 +1639,14 @@ void Node::work (Event* ev){
 
 		else if(currentEvent == START_REDUCE_SORT_FUNC){	// reduce sort (will repetitively be called until remaining files per reducer are less than mapreduce.task.io.sort.factor)
 
+			#ifndef TERMINAL_LOG_DISABLED
+			std::cout << "AppID: " << appID<< " START_REDUCE_SORT_FUNC!"  << ev->getRedId() << " TIME: " <<  ev->getEventTime()<< std::endl;
+			#endif
 			int io_sortFactor = (applications.at(appID))->getMapReduceConfig().getMapreducetaskIoSortFactor();
 			int numberofWaiting2BeMerged = ev->getEntityIns().getAttribute();
 
 			if(numberofWaiting2BeMerged <= io_sortFactor){	// now feed the output of sort to reduce function
+
 				// reduce start (overall)
 				if((applications.at(appID))->getReduceStartTime() < 0){
 					(applications.at(appID))->setReduceStartTime(ev->getEventTime());
@@ -1636,7 +1659,6 @@ void Node::work (Event* ev){
 				recordSetter (reduceOutputPartSize, (applications.at(appID))->getRecordSize(), ev->getRedId(), false, ev);
 			}
 			else if(numberofWaiting2BeMerged >= 2*io_sortFactor-1){		// sort& merge 10 files
-
 				// upon return this will be numberofWaiting2BeMerged (put this into the attribute of the event)
 				numberofWaiting2BeMerged -= (io_sortFactor-1);
 
@@ -1786,6 +1808,7 @@ void Node::work (Event* ev){
 			#ifndef TERMINAL_LOG_DISABLED
 			std::cout << "AppID: " << appID << "+++++++REDUCE FUNCTION STARTED at :" << ev->getRedId() << " TIME: "<< ev->getEventTime() << " BYTES TO BE PROCESSED: "<< ev->getNeededResQuantity() << std::endl;
 			#endif
+
 			// release "read shuffled output" resources in reducer
 			hd_.work(READ_RESOURCE_RELEASE, ev->getSeizedResQuantity(), ev, outputEventType_);
 
@@ -1810,7 +1833,8 @@ void Node::work (Event* ev){
 			// when all the reduce records arrive here, then reduce output completed writing its data for this reduce task..
 			if((applications.at(appID))->areAllReduceRecordComplete(ev->getRedId())){
 				#ifndef TERMINAL_LOG_DISABLED
-				std::cout << "AppID: " << appID << "+++++++REDUCE OUTPUT WRITTEN TO FILE: TIME: "<< ev->getEventTime()  << " BYTES WRITTEN: "<< ev->getNeededResQuantity() << std::endl;
+				std::cout << "AppID: " << appID << "~REDUCE OUTPUT WRITTEN TO FILE: TIME: "<< ev->getEventTime()  << " BYTES WRITTEN: "<< ev->getNeededResQuantity() <<
+						" QueueID: "  << (applications.at(appID))->getQueueId() <<std::endl;
 				#endif
 
 				// add reduce finish time
@@ -1818,6 +1842,9 @@ void Node::work (Event* ev){
 
 				// this reducer has completed its task!
 				(applications.at(appID))->notifyCompletedReducers();
+
+				// decrease active reduce task count
+				g_scheduler.decrementActiveTaskCount(appID, false);
 
 				// release reducer resources
 				memory_.setRemainingCapacity(memory_.getRemainingCapacity() + (applications.at(appID))->getSeizedMapreduceReduceMemory());
@@ -1827,12 +1854,17 @@ void Node::work (Event* ev){
 					if(waitingReducer.taskType){	// reducer
 
 						(applications.at(waitingReducer.appId))->addReducerLocations(waitingReducer.taskLocation);
-
+						#ifndef TERMINAL_LOG_DISABLED
+						std::cout << "Create reducer at "<< waitingReducer.taskLocation << " upon releasing a reducer at location: "<< ev->getDestEventType()  << std::endl;
+						#endif
 						Event newEvent(waitingReducer.appId, (ev->getEventTime()+OVERHEAD_DELAY),HEARTBEAT_SIZE, 0.0, waitingReducer.outEvent, (applications.at(waitingReducer.appId))->getAmEventType(),
 								START_REDUCE_CONTAINER, OTHER, SEIZETOMASTER, waitingReducer.taskLocation);
 						eventsList.push(newEvent);
 					}
 					else{ // map task
+						#ifndef TERMINAL_LOG_DISABLED
+						std::cout << "Create mapper at "<< waitingReducer.taskLocation << " upon releasing a reducer at location: "<< ev->getDestEventType()  << std::endl;
+						#endif
 						// attribute carries mapperLocation
 						Event newEvent(waitingReducer.appId, (ev->getEventTime()+OVERHEAD_DELAY),HEARTBEAT_SIZE, 0.0, waitingReducer.outEvent, (applications.at(waitingReducer.appId))->getAmEventType(),
 								START_MAP_CONTAINER, OTHER, SEIZETOMASTER, waitingReducer.taskLocation, waitingReducer.attr, waitingReducer.fsid);

@@ -49,7 +49,9 @@ extern double simulationTime;						// Simulation time
 
 struct reducerMergeWaiters{
 	int numberOfChunksWaitingToBeMerged_;
-	std::queue<size_t> chunkSize_;
+	//std::queue<size_t> chunkSize_;
+	// TODO: make chunkSize_ a priority queue
+	std::priority_queue<size_t, std::vector<size_t>, std::greater<size_t> > chunkSize_;
 };
 
 struct spillInfo{

@@ -437,7 +437,7 @@ int Application::getReduceWriteCount(int nodeId, int redID){
 }
 
 void Application::adddataWaitingToBeMerged_(int nodeId, size_t dataWaitingToBeMerged, int redID){
-	if (reducerNodeID_dataWaitingToBeMerged_.find(std::make_pair(nodeId,redID)) == reducerNodeID_dataWaitingToBeMerged_.end() ) {	// not found
+	if (reducerNodeID_dataWaitingToBeMerged_.find(std::make_pair(nodeId,redID)) == reducerNodeID_dataWaitingToBeMerged_.end() ){	// not found
 		reducerNodeID_dataWaitingToBeMerged_[std::make_pair(nodeId,redID)].chunkSize_.push(dataWaitingToBeMerged);
 		reducerNodeID_dataWaitingToBeMerged_[std::make_pair(nodeId,redID)].numberOfChunksWaitingToBeMerged_ = 1;
 	}
@@ -459,7 +459,7 @@ size_t Application::popMergeSize(int nodeId, int redID){
 	size_t mergeSize = 0;
 
 	for(int i=0;i<mapReduceConfig_.getMapreducetaskIoSortFactor();i++){
-		mergeSize += reducerNodeID_dataWaitingToBeMerged_[std::make_pair(nodeId,redID)].chunkSize_.front();
+		mergeSize += reducerNodeID_dataWaitingToBeMerged_[std::make_pair(nodeId,redID)].chunkSize_.top();
 		(reducerNodeID_dataWaitingToBeMerged_[std::make_pair(nodeId,redID)].chunkSize_).pop();
 	}
 	return mergeSize;
@@ -469,7 +469,7 @@ size_t Application::popMergeGivenSize(int nodeId, int redID, int mergeCount){
 	size_t mergeSize = 0;
 
 	for(int i=0;i<mergeCount;i++){
-		mergeSize += reducerNodeID_dataWaitingToBeMerged_[std::make_pair(nodeId,redID)].chunkSize_.front();
+		mergeSize += reducerNodeID_dataWaitingToBeMerged_[std::make_pair(nodeId,redID)].chunkSize_.top();
 		(reducerNodeID_dataWaitingToBeMerged_[std::make_pair(nodeId,redID)].chunkSize_).pop();
 	}
 	return mergeSize;

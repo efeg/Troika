@@ -95,6 +95,10 @@ int Scheduler::schedulerSubmitNewApp(size_t appId, int outputEventType){
 	// the queue that the application will be submitted to...
 	int queueID = (applications.at(appId))->getQueueId();
 
+	// initialize active map and reduce tasks
+	activeMapTasks_[appId] = 0;
+	activeReduceTasks_[appId] = 0;
+
 	// required resources for AM
 	size_t amResourcesMB = (applications.at(appId))->getAmResourceMb();
 	amResourcesMB *= ONE_MB_IN_BYTES;
@@ -652,6 +656,24 @@ void Scheduler::schedulerReleaseAMresources(int appID, double outEventTime){
 	}
 }
 
+void Scheduler::incrementActiveTaskCount(int appID, bool isMapTask){
+	if(isMapTask){
+		activeMapTasks_[appID]++;
+	}
+	else{
+		activeReduceTasks_[appID]++;
+	}
+}
+
+void Scheduler::decrementActiveTaskCount(int appID, bool isMapTask){
+	if(isMapTask){
+		activeMapTasks_[appID]--;
+	}
+	else{
+		activeReduceTasks_[appID]--;
+	}
+}
+
 struct waitingTaskInfo Scheduler::schedulerReleaseReducerresources(int appID, int nodeEventType){
 
 	if(isResourceCalculator()){
@@ -664,7 +686,19 @@ struct waitingTaskInfo Scheduler::schedulerReleaseReducerresources(int appID, in
 	queueRemainingMemoryCapacities_.at((applications.at(appID))->getQueueId()) += (applications.at(appID))->getSeizedMapreduceReduceMemory();
 
 	// check if there are any waiting reducer tasks. If there are any, then let it wake up
-	if(waitingReducerQueue_[(applications.at(appID))->getQueueId()].size() > 0){
+/*	if(waitingReducerQueue_[(applications.at(appID))->getQueueId()].size() > 0){
+
+	*/
+
+	// There are waiting reduce tasks AND
+	// (all map tasks are completed for this application OR there are waiting map
+	// tasks but currently the number of active map tasks are more than reduce tasks)
+
+	if((waitingReducerQueue_[(applications.at(appID))->getQueueId()].size() > 0) &&
+	((waitingMapperQueue_[(applications.at(appID))->getQueueId()].size() == 0)  ||  (activeMapTasks_[appID] > activeReduceTasks_[appID]))
+	){
+
+
 		// call schedulerGetReducerLocation() with wake up signal
 		size_t appId = waitingReducerQueue_[(applications.at(appID))->getQueueId()].front().appId;
 		int outEvent = waitingReducerQueue_[(applications.at(appID))->getQueueId()].front().outEvent;
@@ -712,8 +746,12 @@ struct waitingTaskInfo Scheduler::schedulerReleaseMapperresources(int appID, int
 		// release the seized queue resources
 		queueRemainingMemoryCapacities_.at((applications.at(appID))->getQueueId()) += (applications.at(appID))->getSeizedMapreduceMapMemory();
 
+
 		// check if there are any waiting reducer tasks. If there are any, then let it wake up
-		if(waitingReducerQueue_[(applications.at(appID))->getQueueId()].size() > 0){
+		if((waitingReducerQueue_[(applications.at(appID))->getQueueId()].size() > 0) &&
+		((waitingMapperQueue_[(applications.at(appID))->getQueueId()].size() == 0)  ||  (activeMapTasks_[appID] > activeReduceTasks_[appID]))
+		){
+
 
 			size_t appId = waitingReducerQueue_[(applications.at(appID))->getQueueId()].front().appId;
 			int outEvent = waitingReducerQueue_[(applications.at(appID))->getQueueId()].front().outEvent;
@@ -733,6 +771,12 @@ struct waitingTaskInfo Scheduler::schedulerReleaseMapperresources(int appID, int
 
 			return schedulerGetMapperLocation(appId, fileSplitLocationExpectedEventType, true, outEvent, attr, fsid);
 		}
+
+
+
+
+
+
 	}
 	// no waiting mapper task exists
 	struct waitingTaskInfo mapInf;
