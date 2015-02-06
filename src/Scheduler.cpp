@@ -735,7 +735,6 @@ struct waitingTaskInfo Scheduler::schedulerReleaseMapperresources(int appID, int
 		// release the seized queue resources
 		queueRemainingMemoryCapacities_.at((applications.at(appID))->getQueueId()) += (applications.at(appID))->getSeizedMapreduceMapMemory();
 
-
 		// check if there are any waiting reducer tasks. If there are any, then let it wake up
 		if((waitingReducerQueue_[(applications.at(appID))->getQueueId()].size() > 0) &&
 		((waitingMapperQueue_[(applications.at(appID))->getQueueId()].size() == 0)  ||  (activeMapTasks_[appID] > activeReduceTasks_[appID]))
@@ -758,12 +757,6 @@ struct waitingTaskInfo Scheduler::schedulerReleaseMapperresources(int appID, int
 
 			return schedulerGetMapperLocation(appId, fileSplitLocationExpectedEventType, true, outEvent, attr, fsid);
 		}
-
-
-
-
-
-
 	}
 	// no waiting mapper task exists
 	struct waitingTaskInfo mapInf;
