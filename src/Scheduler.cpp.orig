@@ -682,12 +682,29 @@ struct waitingTaskInfo Scheduler::schedulerReleaseReducerresources(int appID, in
 	// release the seized queue resources
 	queueRemainingMemoryCapacities_.at((applications.at(appID))->getQueueId()) += (applications.at(appID))->getSeizedMapreduceReduceMemory();
 
+<<<<<<< HEAD
 	// There are waiting reduce tasks AND
 	// (all map tasks are completed for this application OR there are waiting map
 	// tasks but currently the number of active map tasks are more than reduce tasks)
 	if((waitingReducerQueue_[(applications.at(appID))->getQueueId()].size() > 0) &&
 	((waitingMapperQueue_[(applications.at(appID))->getQueueId()].size() == 0)  ||  (activeMapTasks_[appID] > activeReduceTasks_[appID]))
 	){
+=======
+	// check if there are any waiting reducer tasks. If there are any, then let it wake up
+/*	if(waitingReducerQueue_[(applications.at(appID))->getQueueId()].size() > 0){
+
+	*/
+
+	// There are waiting reduce tasks AND
+	// (all map tasks are completed for this application OR there are waiting map
+	// tasks but currently the number of active map tasks are more than reduce tasks)
+
+	if((waitingReducerQueue_[(applications.at(appID))->getQueueId()].size() > 0) &&
+	((waitingMapperQueue_[(applications.at(appID))->getQueueId()].size() == 0)  ||  (activeMapTasks_[appID] > activeReduceTasks_[appID]))
+	){
+
+
+>>>>>>> 9955fbdcddf70315f7da46e61da725daf0ba8ad4
 		// call schedulerGetReducerLocation() with wake up signal
 		size_t appId = waitingReducerQueue_[(applications.at(appID))->getQueueId()].front().appId;
 		int outEvent = waitingReducerQueue_[(applications.at(appID))->getQueueId()].front().outEvent;
@@ -740,6 +757,11 @@ struct waitingTaskInfo Scheduler::schedulerReleaseMapperresources(int appID, int
 		if((waitingReducerQueue_[(applications.at(appID))->getQueueId()].size() > 0) &&
 		((waitingMapperQueue_[(applications.at(appID))->getQueueId()].size() == 0)  ||  (activeMapTasks_[appID] > activeReduceTasks_[appID]))
 		){
+<<<<<<< HEAD
+=======
+
+
+>>>>>>> 9955fbdcddf70315f7da46e61da725daf0ba8ad4
 			size_t appId = waitingReducerQueue_[(applications.at(appID))->getQueueId()].front().appId;
 			int outEvent = waitingReducerQueue_[(applications.at(appID))->getQueueId()].front().outEvent;
 			waitingReducerQueue_[(applications.at(appID))->getQueueId()].pop();
