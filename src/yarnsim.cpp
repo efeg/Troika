@@ -35,19 +35,25 @@
 #include <string>
 #include "LogMessages.h"
 #include "Init.h"
+#include <chrono>	// added to measure execution time of the simulator
 
 using namespace std;
 
 priority_queue<Event, vector<Event>, EventTimeCompare > eventsList;
 vector<std::shared_ptr<Event>> pendingAppEventList;
 vector<std::shared_ptr<Application>> applications;
-map<size_t, bool> queueID_checkPendingApp;		// signal is true if a queue is available and there might be an application that is submitted to this queue
+map<size_t, bool> queueID_checkPendingApp;			// signal: true if a queue is available and there might be an application that is submitted to this queue
 map<size_t, size_t> queueID_checkPendingAppCount;	// number of pending applications at a specific queue
-map<size_t, size_t> currentlyRunningAppCount;	// number of running applications at a specific queue
+map<size_t, size_t> currentlyRunningAppCount;		// number of running applications at a specific queue
 
 double simulationTime = 0;	// simulation time
 
 int main(int argc, char* argv[]) {
+
+	#ifndef TERMINAL_LOG_DISABLED
+	// start measuring simulation time
+	chrono::high_resolution_clock::time_point simStart = chrono::high_resolution_clock::now();
+	#endif
 
 	double endingCondition;   // time limit of simulation
 	vector<std::shared_ptr<Module>> eventExpectingModules;
@@ -69,7 +75,6 @@ int main(int argc, char* argv[]) {
 		    			maxNumOfConcurrentAppsAtQueue = g_scheduler.getMaxNumberOfAppsAtQueue(kv.first);
 
 		    			// get the event from pendingAppEventList and push it to eventsList
-
 						Event newEvent = *pendingAppEventList.at(i);
 						newEvent.setEventTime(simulationTime);
 						eventsList.push(newEvent);
@@ -109,7 +114,7 @@ int main(int argc, char* argv[]) {
 		// ending condition
         if (simulationTime > endingCondition){
 			cout << "[INFO] Ending condition is satisfied. Simulation completed successfully." << endl;
-			cout << "[INFO] simulationTime: " << simulationTime << " endingCondition " << endingCondition<< endl;
+			cout << "[INFO] Simulation time: " << simulationTime << " EndingCondition " << endingCondition<< endl;
             break;
         }
         // check the eventType and find the correct module waiting for it.
@@ -120,7 +125,6 @@ int main(int argc, char* argv[]) {
         		break;
         	}
         }
-
         if (!currentModule){	// Module that expects the generated event does not exist!
         	cerr << "Unexpected Event with no matched Module! Event type: " << currentEvent.getNextEventType()<< " AppID: " << currentEvent.getAppID() << endl;
         	exit(-1);
@@ -129,5 +133,14 @@ int main(int argc, char* argv[]) {
         printModuleName(currentModule->getModuleId());
         currentModule->work(&currentEvent);
 	}
+
+	#ifndef TERMINAL_LOG_DISABLED
+	// stop measuring simulation time
+    chrono::high_resolution_clock::time_point simEnd = chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>( simEnd - simStart ).count();
+    // execution time of the simulator
+    cout << "Execution time of the simulator: " << duration << std::endl;
+	#endif
+
 	return 0;
 }

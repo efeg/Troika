@@ -43,6 +43,8 @@ Harddisk::Harddisk(size_t maxReadSpeed, size_t maxWriteSpeed, size_t minReadSpee
 	remainingWriteCapacity_ = writeDist(generator) + minWriteSpeed;
 	totalReadCapacity_ = remainingReadCapacity_;
 	totalWriteCapacity_ = remainingWriteCapacity_;
+
+	debugTotalReduce_=0;
 }
 
 Harddisk::~Harddisk() {

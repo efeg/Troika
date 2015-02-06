@@ -29,7 +29,8 @@
 
 size_t Application::ID_ = 0;
 
-Application::Application (size_t applicationSize, size_t applicationOwnerID, double mapIntensity, double mapSortIntensity, double reduceIntensity, double reduceSortIntensity,
+Application::Application (size_t applicationSize, size_t applicationOwnerID, double mapIntensity,
+							double mapSortIntensity, double reduceIntensity, double reduceSortIntensity,
 							double mapOutputVolume, double reduceOutputVolume, double finalOutputVolume,
 							int clientEventType, int rmEventType, std::vector<int> fileSplitExpectedNodeEvents,
 							size_t queueId, MapReduceConf mapReduceConfig, size_t recordSize,
@@ -55,7 +56,6 @@ Application::Application (size_t applicationSize, size_t applicationOwnerID, dou
 							shuffleMergeLimit_(0), wb_completed_(0), reduceStartTime_(-1), reduceFinishTime_(-1),
 							mapStartTime_(-1), mapFinishTime_(-1), appStartTime_(-1), reduceCount_(0)
 							 {
-
 	releasedMappers_ = {};
 
 	// get last filesplit event type
@@ -93,7 +93,6 @@ Application::Application (size_t applicationSize, size_t applicationOwnerID, dou
 	/*
 	 * Initial Application submission event
 	 * DOC: eventBehavior: SUBMIT_JOB means "Submit application" for Client Node
-	 *
 	 */
 	// Application enters to the system (run application command is sent)
 	pendingAppEventList.push_back(std::make_shared<Event>(applicationID_, -1, 0.0, 0.0, clientEventType_, clientEventType_, SUBMIT_JOB, APPLICATION));
@@ -437,7 +436,7 @@ int Application::getReduceWriteCount(int nodeId, int redID){
 }
 
 void Application::adddataWaitingToBeMerged_(int nodeId, size_t dataWaitingToBeMerged, int redID){
-	if (reducerNodeID_dataWaitingToBeMerged_.find(std::make_pair(nodeId,redID)) == reducerNodeID_dataWaitingToBeMerged_.end() ) {	// not found
+	if (reducerNodeID_dataWaitingToBeMerged_.find(std::make_pair(nodeId,redID)) == reducerNodeID_dataWaitingToBeMerged_.end() ){	// not found
 		reducerNodeID_dataWaitingToBeMerged_[std::make_pair(nodeId,redID)].chunkSize_.push(dataWaitingToBeMerged);
 		reducerNodeID_dataWaitingToBeMerged_[std::make_pair(nodeId,redID)].numberOfChunksWaitingToBeMerged_ = 1;
 	}
@@ -459,7 +458,7 @@ size_t Application::popMergeSize(int nodeId, int redID){
 	size_t mergeSize = 0;
 
 	for(int i=0;i<mapReduceConfig_.getMapreducetaskIoSortFactor();i++){
-		mergeSize += reducerNodeID_dataWaitingToBeMerged_[std::make_pair(nodeId,redID)].chunkSize_.front();
+		mergeSize += reducerNodeID_dataWaitingToBeMerged_[std::make_pair(nodeId,redID)].chunkSize_.top();
 		(reducerNodeID_dataWaitingToBeMerged_[std::make_pair(nodeId,redID)].chunkSize_).pop();
 	}
 	return mergeSize;
@@ -469,7 +468,7 @@ size_t Application::popMergeGivenSize(int nodeId, int redID, int mergeCount){
 	size_t mergeSize = 0;
 
 	for(int i=0;i<mergeCount;i++){
-		mergeSize += reducerNodeID_dataWaitingToBeMerged_[std::make_pair(nodeId,redID)].chunkSize_.front();
+		mergeSize += reducerNodeID_dataWaitingToBeMerged_[std::make_pair(nodeId,redID)].chunkSize_.top();
 		(reducerNodeID_dataWaitingToBeMerged_[std::make_pair(nodeId,redID)].chunkSize_).pop();
 	}
 	return mergeSize;
@@ -890,7 +889,7 @@ void Application::setShuffleReadInfo(int fsID, int redID, int remainingNumberOfM
 }
 
 int Application::incShuffleReadBufferCompletedPacketCount(int fsID, int redID){
-	if(  bufferShuffleReadDonePcktCount_.find(std::make_pair(fsID,redID)) == bufferShuffleReadDonePcktCount_.end()  ){	// if does not exist create it...
+	if( bufferShuffleReadDonePcktCount_.find(std::make_pair(fsID,redID)) == bufferShuffleReadDonePcktCount_.end() ){	// if does not exist create it...
 		bufferShuffleReadDonePcktCount_[std::make_pair(fsID,redID)]=0;
 	}
 

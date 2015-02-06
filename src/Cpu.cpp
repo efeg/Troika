@@ -238,7 +238,7 @@ void Cpu::nonSpillComplete(int fsId, size_t completedSize, Event *ev){
 	fsId_processedBufferBytes[std::make_pair(fsId,ev->getAppID())] += completedSize;
 	// increase processed record count
 	fsId_processedRecordCount[std::make_pair(fsId,ev->getAppID())]++;
-	// decrease active cpu user count for current map task
+	// decrease active CPU user count for current map task
 	decCpuUserCount(fsId, ev->getAppID());
 
 	if(!isActiveSpill[std::make_pair(fsId,ev->getAppID())] &&

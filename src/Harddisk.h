@@ -108,6 +108,7 @@ private:
 	enum EntityType entityType, int attribute, int fsLoc, int fsId, int redID, int recordID, size_t spillTally);
 	void releaseIOResources(double seizedSpeedCapacity, double* remainingIoCapacity, int* capInUsePercent, double totCapacity);
 	int calculateIOSpeed(double *estimatedIOSpeed, int *capInUsePercent, double totIOcapacity);
+	double debugTotalReduce_;
 };
 #endif
 

@@ -298,7 +298,7 @@ ___________________INPUT___________________________________________\n\n# Please 
 " + dfsBlockSize.rstrip() + " [" + mapreduceTaskIoSortFactor.rstrip() + " [" + mapreduceTaskIoSortMb.rstrip() + " [" + mapreduceMapSortSpillPercent.rstrip() + " [1 [" + mapreduceReduceShuffleParallelcopies.rstrip() + " [\
 " + mapreduceReduceShuffleMergePercent.rstrip() + " [" + mapreduceReduceShuffleInputBufferPercent.rstrip() + " [" + mapreduceReduceInputBufferPercent.rstrip() + " [0 [" + mapreduceJobUbertaskMaxmaps.rstrip() + " [\
 " + mapreduceJobUbertaskMaxreduces.rstrip() + " [" + nodemanagerResourceMemoryMB.rstrip() + " " + nodemanagerResourceCpuCores.rstrip() + " [" + getMapreduceJobReduceSlowstartCompletedmaps.rstrip() + " [\
-" + mapred_child_java_opts.rstrip() +  "]]]]]]]]]]]]]]]]]\n\n# FILESPLIT LOCATIONS (in terms of expected node event type)\nfilesplit *isforcedMapTaskCount* *numberOfFilesplits* *nodeExpectedId1* \
+" + mapred_child_java_opts.rstrip() +  "]]]]]]]]]]]]]]]]]\n\n# FILESPLIT LOCATIONS (in terms of expected node event type)\nfilesplit *isforcedMapTaskCount* *forcedReduceTaskCount* *numberOfFilesplits* *nodeExpectedId1* \
 *nodeExpectedId2* *...* nodeExpectedIdN*\n\n")
 
 

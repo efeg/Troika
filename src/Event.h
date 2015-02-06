@@ -95,7 +95,7 @@ public:
 private:
 	size_t applicationID_;
 	double eventTime_, neededResQuantity_, seizedResQuantity_;
-	int nextEventType_;  // is it an arrival? departure? etc? which module is it heading to?
+	int nextEventType_;  // is it an arrival/departure/etc? which module is it heading to?
 	int destinationEventType_, eventBehavior_;
 	enum LinkEventBehavior linkBehavior_;
 	Entity entityIns_;

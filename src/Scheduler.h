@@ -119,6 +119,10 @@ public:
 
 	size_t getMaxNumberOfAppsAtQueue(size_t queueIndex);
 
+	void incrementActiveTaskCount(int, bool);
+
+	void decrementActiveTaskCount(int, bool);
+
 private:
 	std::vector<double> queueCapacities_;			// queueId from Application will match with the order the elements are pushed to vector
 	double maxAmResourcePercent_;
@@ -133,6 +137,8 @@ private:
 	std::map<int, std::queue<waitingTaskInfo>> waitingMapperQueue_, waitingReducerQueue_;
 	std::map<int, int> nodeId_maxNumberOfMapTaskPerNode;
 	std::map<int, std::queue<amScheduleData>> containerPendingAppQueue_; // an app that can run concurrently in a queue but has no resource for am is enqueued here.
+
+	std::map<int,int> activeMapTasks_, activeReduceTasks_;	// keeps track of active tasks for each type for each app.
 
 	void incnodeId_maxNumberOfMapTaskPerNode(int fsloc, int appID);
 	void setWaitingTaskInfo(waitingTaskInfo &info, size_t appID, int taskLocation, int attr, int fsID, int outEvent, bool taskType);

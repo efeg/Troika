@@ -95,6 +95,10 @@ int Scheduler::schedulerSubmitNewApp(size_t appId, int outputEventType){
 	// the queue that the application will be submitted to...
 	int queueID = (applications.at(appId))->getQueueId();
 
+	// initialize active map and reduce tasks
+	activeMapTasks_[appId] = 0;
+	activeReduceTasks_[appId] = 0;
+
 	// required resources for AM
 	size_t amResourcesMB = (applications.at(appId))->getAmResourceMb();
 	amResourcesMB *= ONE_MB_IN_BYTES;
@@ -134,21 +138,19 @@ int Scheduler::schedulerSubmitNewApp(size_t appId, int outputEventType){
 				// decrease the seized queue resources
 				queueRemainingMemoryCapacities_.at(queueID) -= amResourcesMB;
 				#ifndef TERMINAL_LOG_DISABLED
-				std::cout << "queueRemainingMemoryCapacities_ amResourcesMB "<< queueRemainingMemoryCapacities_.at(queueID) << std::endl;
+				std::cout << "SCHE||INFO: queueRemainingMemoryCapacities_ amResourcesMB "<< queueRemainingMemoryCapacities_.at(queueID) << std::endl;
 				#endif
-
 				// return the eventType of the node that contain these resources
 				return workerNodeExpectedEventTypes_.at(i);
 			}
 		}
-
 		struct amScheduleData pendingApp;
 		pendingApp.appId_ = appId;
 		pendingApp.outputEventType_ = outputEventType;
 		containerPendingAppQueue_[(applications.at(appId))->getQueueId()].push(pendingApp);
 		#ifndef TERMINAL_LOG_DISABLED
 		// if a worker node cannot be found, application cannot be submitted
-		std::cerr << "Insufficient RESOURCES AT WORKER NODES FOR APP MASTER! AppId: " << appId << std::endl;
+		std::cerr << "SCHE||INFO: Insufficient RESOURCES AT WORKER NODES FOR APP MASTER! AppId: " << appId << std::endl;
 		#endif
 	}
 	else {
@@ -157,7 +159,7 @@ int Scheduler::schedulerSubmitNewApp(size_t appId, int outputEventType){
 		pendingApp.outputEventType_ = outputEventType;
 		containerPendingAppQueue_[(applications.at(appId))->getQueueId()].push(pendingApp);
 		#ifndef TERMINAL_LOG_DISABLED
-		std::cout << "Insufficient RESOURCES FOR APP MASTER! AppId: " << appId << std::endl;
+		std::cout << "SCHE||INFO: Insufficient RESOURCES FOR APP MASTER! AppId: " << appId << std::endl;
 		#endif
 	}
 	return -1;
@@ -229,7 +231,7 @@ struct waitingTaskInfo Scheduler::schedulerGetMapperLocation(size_t appId, int f
 		if (allocatedMemory > queueRemainingMemoryCapacities_.at((applications.at(appId))->getQueueId())
 				|| (isResourceCalculator() && (allocatedCpu > queueRemainingCoreCapacities_.at((applications.at(appId))->getQueueId())))){
 			#ifndef TERMINAL_LOG_DISABLED
-			std::cout << "Insufficient RESOURCES FOR MAPPER! AppId: " << appId << std::endl;
+			std::cout << "SCHE||INFO: Insufficient RESOURCES FOR MAPPER! AppId: " << appId << std::endl;
 			#endif
 
 			//Put them all to a wait list (suspend)! set the waiting task properties...
@@ -238,7 +240,7 @@ struct waitingTaskInfo Scheduler::schedulerGetMapperLocation(size_t appId, int f
 			waitingMapperQueue_[(applications.at(appId))->getQueueId()].push(info);
 
 			#ifndef TERMINAL_LOG_DISABLED
-			std::cout << "Map task waiting list size: " << waitingMapperQueue_[(applications.at(appId))->getQueueId()].size() << std::endl;
+			std::cout << "SCHE||INFO: Map task waiting list size: " << waitingMapperQueue_[(applications.at(appId))->getQueueId()].size() << std::endl;
 			#endif
 			maxAlreadySet_ = true; // cannot run any more map task at any node.
 			return mapInf;
@@ -444,7 +446,7 @@ struct waitingTaskInfo Scheduler::schedulerGetMapperLocation(size_t appId, int f
 
 	#ifndef TERMINAL_LOG_DISABLED
 	// no node has enough resources for the mapper
-	std::cerr << "Not enough resources for the mapper: " << appId << std::endl;
+	std::cerr << "SCHE||INFO: Not enough resources for the mapper: " << appId << std::endl;
 	#endif
 
 	struct waitingTaskInfo info;
@@ -452,7 +454,7 @@ struct waitingTaskInfo Scheduler::schedulerGetMapperLocation(size_t appId, int f
 	waitingMapperQueue_[(applications.at(appId))->getQueueId()].push(info);
 
 	#ifndef TERMINAL_LOG_DISABLED
-	std::cout << "Map task waiting list size: " << waitingMapperQueue_[(applications.at(appId))->getQueueId()].size() << std::endl;
+	std::cout << "SCHE||INFO: Map task waiting list size: " << waitingMapperQueue_[(applications.at(appId))->getQueueId()].size() << std::endl;
 	#endif
 
 	mapInf.taskLocation = -1;
@@ -497,7 +499,7 @@ struct waitingTaskInfo Scheduler::schedulerGetReducerLocation(size_t appId, bool
 		if (allocatedMemory > queueRemainingMemoryCapacities_.at((applications.at(appId))->getQueueId())
 				|| (isResourceCalculator() && (allocatedCpu > queueRemainingCoreCapacities_.at((applications.at(appId))->getQueueId())))){
 			#ifndef TERMINAL_LOG_DISABLED
-			std::cerr << "WARNING: Insufficient RESOURCES FOR REDUCER || AppId: " << appId << " allocatedMemory: " << allocatedMemory << " remaining capacity " << queueRemainingMemoryCapacities_.at((applications.at(appId))->getQueueId()) << std::endl;
+			std::cerr << "SCHE||WARNING: Insufficient RESOURCES FOR REDUCER || AppId: " << appId << " allocatedMemory: " << allocatedMemory << " remaining capacity " << queueRemainingMemoryCapacities_.at((applications.at(appId))->getQueueId()) << std::endl;
 			#endif
 
 			// Put them all to a wait list (suspend)!
@@ -506,7 +508,7 @@ struct waitingTaskInfo Scheduler::schedulerGetReducerLocation(size_t appId, bool
 			waitingReducerQueue_[(applications.at(appId))->getQueueId()].push(info);
 
 			#ifndef TERMINAL_LOG_DISABLED
-			std::cout << "Reducer waiting list size: " << waitingReducerQueue_[(applications.at(appId))->getQueueId()].size() << std::endl;
+			std::cout << "SCHE||INFO: Reducer waiting list size: " << waitingReducerQueue_[(applications.at(appId))->getQueueId()].size() << std::endl;
 			#endif
 			return redInf;
 		}
@@ -582,7 +584,7 @@ struct waitingTaskInfo Scheduler::schedulerGetReducerLocation(size_t appId, bool
 	}
 	#ifndef TERMINAL_LOG_DISABLED
 	// No node has enough resources for the reducer
-	std::cerr << "Not enough resources for the reduce task: " << appId << std::endl;
+	std::cerr << "SCHE||INFO: Not enough resources for the reduce task: " << appId << std::endl;
 	#endif
 
 	struct waitingTaskInfo info;
@@ -590,7 +592,7 @@ struct waitingTaskInfo Scheduler::schedulerGetReducerLocation(size_t appId, bool
 	waitingReducerQueue_[(applications.at(appId))->getQueueId()].push(info);
 
 	#ifndef TERMINAL_LOG_DISABLED
-	std::cout << "Reducer waiting list size: " << waitingReducerQueue_[(applications.at(appId))->getQueueId()].size() << std::endl;
+	std::cout << "SCHE||INFO: Reducer waiting list size: " << waitingReducerQueue_[(applications.at(appId))->getQueueId()].size() << std::endl;
 	#endif
 	return redInf;
 }
@@ -644,11 +646,28 @@ void Scheduler::schedulerReleaseAMresources(int appID, double outEventTime){
 		if(nodemanagerEventType != -1){
 			// create an event that has a scheduled AM
 			(applications.at(suspendedAppID.appId_))->setAmEventType(nodemanagerEventType);
-
 			// Event to start container (NODEMANAGER event behavior: START_AM_CONTAINER)
 			Event newEvent(suspendedAppID.appId_, outEventTime, HEARTBEAT_SIZE, 0.0, suspendedAppID.outputEventType_, nodemanagerEventType, START_AM_CONTAINER, OTHER);
 			eventsList.push(newEvent);
 		}
+	}
+}
+
+void Scheduler::incrementActiveTaskCount(int appID, bool isMapTask){
+	if(isMapTask){
+		activeMapTasks_[appID]++;
+	}
+	else{
+		activeReduceTasks_[appID]++;
+	}
+}
+
+void Scheduler::decrementActiveTaskCount(int appID, bool isMapTask){
+	if(isMapTask){
+		activeMapTasks_[appID]--;
+	}
+	else{
+		activeReduceTasks_[appID]--;
 	}
 }
 
@@ -663,8 +682,12 @@ struct waitingTaskInfo Scheduler::schedulerReleaseReducerresources(int appID, in
 	// release the seized queue resources
 	queueRemainingMemoryCapacities_.at((applications.at(appID))->getQueueId()) += (applications.at(appID))->getSeizedMapreduceReduceMemory();
 
-	// check if there are any waiting reducer tasks. If there are any, then let it wake up
-	if(waitingReducerQueue_[(applications.at(appID))->getQueueId()].size() > 0){
+	// There are waiting reduce tasks AND
+	// (all map tasks are completed for this application OR there are waiting map
+	// tasks but currently the number of active map tasks are more than reduce tasks)
+	if((waitingReducerQueue_[(applications.at(appID))->getQueueId()].size() > 0) &&
+	((waitingMapperQueue_[(applications.at(appID))->getQueueId()].size() == 0)  ||  (activeMapTasks_[appID] > activeReduceTasks_[appID]))
+	){
 		// call schedulerGetReducerLocation() with wake up signal
 		size_t appId = waitingReducerQueue_[(applications.at(appID))->getQueueId()].front().appId;
 		int outEvent = waitingReducerQueue_[(applications.at(appID))->getQueueId()].front().outEvent;
@@ -713,8 +736,9 @@ struct waitingTaskInfo Scheduler::schedulerReleaseMapperresources(int appID, int
 		queueRemainingMemoryCapacities_.at((applications.at(appID))->getQueueId()) += (applications.at(appID))->getSeizedMapreduceMapMemory();
 
 		// check if there are any waiting reducer tasks. If there are any, then let it wake up
-		if(waitingReducerQueue_[(applications.at(appID))->getQueueId()].size() > 0){
-
+		if((waitingReducerQueue_[(applications.at(appID))->getQueueId()].size() > 0) &&
+		((waitingMapperQueue_[(applications.at(appID))->getQueueId()].size() == 0)  ||  (activeMapTasks_[appID] > activeReduceTasks_[appID]))
+		){
 			size_t appId = waitingReducerQueue_[(applications.at(appID))->getQueueId()].front().appId;
 			int outEvent = waitingReducerQueue_[(applications.at(appID))->getQueueId()].front().outEvent;
 			waitingReducerQueue_[(applications.at(appID))->getQueueId()].pop();
@@ -749,6 +773,5 @@ size_t Scheduler::getMaxNumberOfAppsAtQueue(size_t queueIndex){
 	// required resources for AM
 	size_t amResourcesMB = (applications.at(0))->getAmResourceMb();
 	amResourcesMB *= ONE_MB_IN_BYTES;
-
 	return ((maxAmResourcePercent_ * queueRemainingMemoryCapacities_.at(queueIndex))/amResourcesMB) + 1;
 }

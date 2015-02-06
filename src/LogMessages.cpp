@@ -32,10 +32,10 @@ void printModuleName(enum ModuleType moduleID){
 
 	#ifndef TERMINAL_LOG_DISABLED
 	switch(moduleID){
-	case NODE: std::cout <<  PRINT_UNDER <<       "NODE module___________|" << std::endl; break;
-	case LINK: std::cout <<  PRINT_UNDER <<       "LINK module___________|" << std::endl; break;
-	case SWITCH: std::cout <<  PRINT_UNDER <<     "SWITCH module_________|" << std::endl; break;
-	default: std::cout <<  PRINT_UNDER <<         "UNRECOGNIZED module___|" << std::endl; break;
+	case NODE: std::cout <<  PRINT_UNDER <<       "[INFO] NODE module___________|" << std::endl; break;
+	case LINK: std::cout <<  PRINT_UNDER <<       "[INFO] LINK module___________|" << std::endl; break;
+	case SWITCH: std::cout <<  PRINT_UNDER <<     "[INFO] SWITCH module_________|" << std::endl; break;
+	default: std::cout <<  PRINT_UNDER <<         "[INFO] UNRECOGNIZED module___|" << std::endl; break;
 	}
 	#endif
 }

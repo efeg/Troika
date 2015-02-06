@@ -33,13 +33,9 @@
 
 Event::Event(size_t applicationID, double eventTime, double neededResQuantity, double seizedResQuantity, int nextEventType,  int destinationEventType,
 		 int eventBehavior, enum EntityType entityType, enum LinkEventBehavior linkBehavior, int attribute, int fsLoc, int fsID, int redID, int recordID, size_t spillTally):
-				applicationID_(applicationID), eventTime_(eventTime),
-				neededResQuantity_(neededResQuantity), seizedResQuantity_(seizedResQuantity),
-				nextEventType_(nextEventType), destinationEventType_(destinationEventType),
-				eventBehavior_(eventBehavior), linkBehavior_ (linkBehavior),
-				entityIns_(entityType, attribute), fsLoc_(fsLoc),
-				fsID_(fsID), redID_(redID),
-				recordID_(recordID), spillTally_(spillTally){
+				applicationID_(applicationID), eventTime_(eventTime), neededResQuantity_(neededResQuantity), seizedResQuantity_(seizedResQuantity),
+				nextEventType_(nextEventType), destinationEventType_(destinationEventType), eventBehavior_(eventBehavior), linkBehavior_ (linkBehavior),
+				entityIns_(entityType, attribute), fsLoc_(fsLoc), fsID_(fsID), redID_(redID), recordID_(recordID), spillTally_(spillTally){
 }
 
 Event::Event(const Event& other):
